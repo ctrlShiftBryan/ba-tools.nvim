@@ -393,6 +393,9 @@ local function open_diff()
 	-- For untracked files, just open them normally (no diff to show)
 	if is_untracked then
 		close_menu()
+		-- Clean up any existing diff mode and windows
+		vim.cmd("diffoff!")
+		vim.cmd("only")
 		vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 		return
 	end
