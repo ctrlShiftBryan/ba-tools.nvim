@@ -151,6 +151,17 @@ local function refresh_menu()
 	local current_file_info = get_current_file()
 	local current_filepath = current_file_info and current_file_info.entry.file or nil
 
+	-- First pass: Calculate max filename width for consistent columns
+	local max_filename_width = 0
+	for _, entry in ipairs(status.staged) do
+		local filename = vim.fn.fnamemodify(entry.file, ":t")
+		max_filename_width = math.max(max_filename_width, #filename)
+	end
+	for _, entry in ipairs(status.unstaged) do
+		local filename = vim.fn.fnamemodify(entry.file, ":t")
+		max_filename_width = math.max(max_filename_width, #filename)
+	end
+
 	-- Build lines
 	local lines = {}
 	local line_num = 1
@@ -166,7 +177,7 @@ local function refresh_menu()
 
 	if #status.staged > 0 then
 		for i, entry in ipairs(status.staged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, false)
+			local line = ui.format_file_line(entry.file, entry.status, state.width, false, max_filename_width)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "staged", index = i, entry = entry }
@@ -192,7 +203,7 @@ local function refresh_menu()
 
 	if #status.unstaged > 0 then
 		for i, entry in ipairs(status.unstaged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, false)
+			local line = ui.format_file_line(entry.file, entry.status, state.width, false, max_filename_width)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "unstaged", index = i, entry = entry }
@@ -425,6 +436,17 @@ M.show = function()
 	state.win = window.win
 	state.width = window.width
 
+	-- First pass: Calculate max filename width for consistent columns
+	local max_filename_width = 0
+	for _, entry in ipairs(status.staged) do
+		local filename = vim.fn.fnamemodify(entry.file, ":t")
+		max_filename_width = math.max(max_filename_width, #filename)
+	end
+	for _, entry in ipairs(status.unstaged) do
+		local filename = vim.fn.fnamemodify(entry.file, ":t")
+		max_filename_width = math.max(max_filename_width, #filename)
+	end
+
 	-- Build lines
 	local lines = {}
 	local line_num = 1
@@ -439,7 +461,7 @@ M.show = function()
 
 	if #status.staged > 0 then
 		for i, entry in ipairs(status.staged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, false)
+			local line = ui.format_file_line(entry.file, entry.status, state.width, false, max_filename_width)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "staged", index = i, entry = entry }
@@ -459,7 +481,7 @@ M.show = function()
 
 	if #status.unstaged > 0 then
 		for i, entry in ipairs(status.unstaged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, false)
+			local line = ui.format_file_line(entry.file, entry.status, state.width, false, max_filename_width)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "unstaged", index = i, entry = entry }

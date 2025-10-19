@@ -46,8 +46,8 @@ end
 
 -- Format a file entry for display in three columns:
 -- "  filename.ts      path/to/dir/    A"
--- Priority: Always show full filename, path gets remaining space
-M.format_file_line = function(filepath, status, width, is_selected)
+-- Uses consistent column widths across all files (based on max_filename_width)
+M.format_file_line = function(filepath, status, width, is_selected, max_filename_width)
 	local filename = vim.fn.fnamemodify(filepath, ":t")
 	local dir = vim.fn.fnamemodify(filepath, ":h")
 
@@ -63,9 +63,17 @@ M.format_file_line = function(filepath, status, width, is_selected)
 	local spacing = "  " -- Space between filename and path
 	local status_col = "  " .. status
 
+	-- Use consistent filename column width for all files
+	-- Pad filename to max width so path column aligns
+	local filename_padding = max_filename_width - #filename
+	if filename_padding < 0 then
+		filename_padding = 0
+	end
+	local padded_filename = filename .. string.rep(" ", filename_padding)
+
 	-- Calculate available space for path
-	-- total_width = prefix + filename + spacing + path + status_col
-	local used = #prefix + #filename + #spacing + #status_col
+	-- total_width = prefix + max_filename_width + spacing + path + status_col
+	local used = #prefix + max_filename_width + #spacing + #status_col
 	local path_space = width - used
 
 	-- Truncate path if it doesn't fit
@@ -86,7 +94,7 @@ M.format_file_line = function(filepath, status, width, is_selected)
 		path_padding = 0
 	end
 
-	return prefix .. filename .. spacing .. display_path .. string.rep(" ", path_padding) .. status_col
+	return prefix .. padded_filename .. spacing .. display_path .. string.rep(" ", path_padding) .. status_col
 end
 
 return M
