@@ -533,8 +533,8 @@ local function discard_changes()
 	end
 end
 
--- Stage all unstaged files at the current file's path
-local function stage_path()
+-- Toggle (stage/unstage) all files at the current file's path
+local function toggle_path()
 	local file_info = get_current_file()
 	if not file_info then
 		return
@@ -542,12 +542,13 @@ local function stage_path()
 
 	-- Cannot use on category
 	if file_info.is_category then
-		vim.notify("Cannot stage path from category. Select a file.", vim.log.levels.WARN)
+		vim.notify("Cannot toggle path from category. Select a file.", vim.log.levels.WARN)
 		return
 	end
 
 	local filepath = file_info.entry.file
 	local dir = vim.fn.fnamemodify(filepath, ":h")
+	local section = file_info.section
 
 	-- Get current git status
 	local status, err = git.get_status()
@@ -556,25 +557,48 @@ local function stage_path()
 		return
 	end
 
-	-- Find all unstaged files in the same directory
-	local files_to_stage = {}
-	for _, entry in ipairs(status.unstaged) do
-		local entry_dir = vim.fn.fnamemodify(entry.file, ":h")
-		if entry_dir == dir then
-			table.insert(files_to_stage, entry.file)
+	local files_to_process = {}
+	local action = ""
+	local action_past = ""
+
+	if section == "unstaged" then
+		-- Find all unstaged files in the same directory
+		for _, entry in ipairs(status.unstaged) do
+			local entry_dir = vim.fn.fnamemodify(entry.file, ":h")
+			if entry_dir == dir then
+				table.insert(files_to_process, entry.file)
+			end
 		end
+		action = "stage"
+		action_past = "Staged"
+	else -- staged
+		-- Find all staged files in the same directory
+		for _, entry in ipairs(status.staged) do
+			local entry_dir = vim.fn.fnamemodify(entry.file, ":h")
+			if entry_dir == dir then
+				table.insert(files_to_process, entry.file)
+			end
+		end
+		action = "unstage"
+		action_past = "Unstaged"
 	end
 
-	-- Check if there are any files to stage
-	if #files_to_stage == 0 then
-		vim.notify("No unstaged files at path: " .. dir, vim.log.levels.INFO)
+	-- Check if there are any files to process
+	if #files_to_process == 0 then
+		vim.notify(string.format("No %s files at path: %s", section, dir), vim.log.levels.INFO)
 		return
 	end
 
-	-- Stage all files
+	-- Process all files
 	local failed = {}
-	for _, file in ipairs(files_to_stage) do
-		local success, stage_err = git.stage_file(file)
+	for _, file in ipairs(files_to_process) do
+		local success, process_err
+		if section == "unstaged" then
+			success, process_err = git.stage_file(file)
+		else
+			success, process_err = git.unstage_file(file)
+		end
+
 		if not success then
 			table.insert(failed, file)
 		end
@@ -582,9 +606,9 @@ local function stage_path()
 
 	-- Show notification
 	if #failed == 0 then
-		vim.notify(string.format("Staged %d files at %s", #files_to_stage, dir), vim.log.levels.INFO)
+		vim.notify(string.format("%s %d files at %s", action_past, #files_to_process, dir), vim.log.levels.INFO)
 	else
-		vim.notify(string.format("Failed to stage %d files", #failed), vim.log.levels.ERROR)
+		vim.notify(string.format("Failed to %s %d files", action, #failed), vim.log.levels.ERROR)
 	end
 
 	-- Refresh the menu
@@ -626,7 +650,7 @@ local function setup_keymaps(buf)
 	vim.keymap.set("n", "o", open_file, opts)
 	vim.keymap.set("n", "s", toggle_stage, opts)
 	vim.keymap.set("n", "d", discard_changes, opts)
-	vim.keymap.set("n", "p", stage_path, opts)
+	vim.keymap.set("n", "p", toggle_path, opts)
 
 	-- Close
 	vim.keymap.set("n", "q", close_menu, opts)
