@@ -147,8 +147,11 @@ local function refresh_menu()
 		return
 	end
 
-	-- Remember current line number to maintain position after refresh
-	local target_line = state.current_line
+	-- Remember current section and index to maintain position after refresh
+	local current_file_info = get_current_file()
+	local target_section = current_file_info and current_file_info.section
+	local target_index = current_file_info and current_file_info.index
+	local target_is_category = current_file_info and current_file_info.is_category
 
 	-- First pass: Calculate max filename width for consistent columns
 	local max_filename_width = 0
@@ -208,16 +211,32 @@ local function refresh_menu()
 	state.selectable_lines = selectable_lines
 	state.line_to_file = line_to_file
 
-	-- Set cursor position (stay at same line number, or closest selectable line)
-	if target_line and target_line <= #lines and is_selectable(target_line) then
-		-- Target line is still valid and selectable
+	-- Set cursor position (stay at same section + index for natural "next file" behavior)
+	local target_line = nil
+
+	if target_section and target_is_category then
+		-- Restore to the category header for the same section
+		for line, file_info in pairs(line_to_file) do
+			if file_info.is_category and file_info.section == target_section then
+				target_line = line
+				break
+			end
+		end
+	elseif target_section and target_index then
+		-- Restore to same index within the section (which is now the "next" file)
+		for line, file_info in pairs(line_to_file) do
+			if not file_info.is_category and file_info.section == target_section and file_info.index == target_index then
+				target_line = line
+				break
+			end
+		end
+	end
+
+	-- Fallback: if target not found, use first selectable line
+	if target_line and is_selectable(target_line) then
 		state.current_line = target_line
-	elseif target_line and target_line <= #lines then
-		-- Target line exists but isn't selectable, find nearest selectable
-		state.current_line = find_next_selectable(target_line, 1)
 	elseif #selectable_lines > 0 then
-		-- Target line is beyond end of list, use last selectable line
-		state.current_line = selectable_lines[#selectable_lines]
+		state.current_line = selectable_lines[1]
 	end
 
 	-- Add cursor indicator
