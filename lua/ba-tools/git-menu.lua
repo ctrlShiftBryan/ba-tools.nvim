@@ -6,8 +6,9 @@ local M = {}
 -- Create highlight namespace for selection
 local ns_id = vim.api.nvim_create_namespace("ba-git-menu-selection")
 
--- Ergonomic two-character keybind pattern using hjkl; home row (25 total)
-local keybind_sequence = {
+-- Ergonomic two-character keybind pattern using hjkl; home row
+-- Lowercase (25 total): Opens diff view
+local keybind_sequence_diff = {
 	-- Same key (easiest)
 	"hh", "jj", "kk", "ll", ";;",
 	-- Adjacent outward roll
@@ -22,6 +23,23 @@ local keybind_sequence = {
 	"hl", "lh", "h;", ";h", "j;", ";j"
 }
 
+-- Uppercase (16 total): Opens file directly (no diff)
+-- Note: Semicolon has no uppercase, so those combinations are excluded
+local keybind_sequence_direct = {
+	-- Same key (easiest)
+	"HH", "JJ", "KK", "LL",
+	-- Adjacent outward roll
+	"HJ", "JK", "KL",
+	-- Adjacent inward roll
+	"JH", "KJ", "LK",
+	-- Skip one outward
+	"HK", "JL",
+	-- Skip one inward
+	"KH", "LJ",
+	-- Remaining combinations
+	"HL", "LH"
+}
+
 -- Persistent state across menu invocations
 local last_selected_file = nil
 
@@ -34,7 +52,8 @@ local state = {
 	lines = {},
 	line_to_file = {}, -- Map line number to file entry
 	selectable_lines = {}, -- Lines that can be selected
-	keybind_to_line = {}, -- Map keybind to line number
+	keybind_to_line_diff = {}, -- Map lowercase keybind to line number (opens diff)
+	keybind_to_line_direct = {}, -- Map uppercase keybind to line number (opens directly)
 }
 
 -- Reset state
@@ -47,7 +66,8 @@ local function reset_state()
 		lines = {},
 		line_to_file = {},
 		selectable_lines = {},
-		keybind_to_line = {},
+		keybind_to_line_diff = {},
+		keybind_to_line_direct = {},
 	}
 end
 
@@ -177,8 +197,9 @@ local function refresh_menu()
 	local line_num = 1
 	local selectable_lines = {}
 	local line_to_file = {}
-	local keybind_to_line = {}
-	local keybind_idx = 1 -- Track keybind assignment (1-25)
+	local keybind_to_line_diff = {}
+	local keybind_to_line_direct = {}
+	local keybind_idx = 1 -- Track keybind assignment
 
 	-- Staged section
 	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
@@ -188,13 +209,23 @@ local function refresh_menu()
 
 	if #status.staged > 0 then
 		for i, entry in ipairs(status.staged) do
-			-- Assign keybind if within limit (25 files max)
-			local keybind = nil
-			if keybind_idx <= #keybind_sequence then
-				keybind = keybind_sequence[keybind_idx]
-				keybind_to_line[keybind] = line_num
-				keybind_idx = keybind_idx + 1
+			-- Assign both lowercase (diff) and uppercase (direct) keybinds
+			local keybind_diff = nil
+			local keybind_direct = nil
+
+			if keybind_idx <= #keybind_sequence_diff then
+				keybind_diff = keybind_sequence_diff[keybind_idx]
+				keybind_to_line_diff[keybind_diff] = line_num
 			end
+
+			if keybind_idx <= #keybind_sequence_direct then
+				keybind_direct = keybind_sequence_direct[keybind_idx]
+				keybind_to_line_direct[keybind_direct] = line_num
+			end
+
+			-- Use lowercase keybind for display
+			local keybind = keybind_diff
+			keybind_idx = keybind_idx + 1
 
 			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
 			table.insert(lines, line)
@@ -216,13 +247,23 @@ local function refresh_menu()
 
 	if #status.unstaged > 0 then
 		for i, entry in ipairs(status.unstaged) do
-			-- Assign keybind if within limit (25 files max)
-			local keybind = nil
-			if keybind_idx <= #keybind_sequence then
-				keybind = keybind_sequence[keybind_idx]
-				keybind_to_line[keybind] = line_num
-				keybind_idx = keybind_idx + 1
+			-- Assign both lowercase (diff) and uppercase (direct) keybinds
+			local keybind_diff = nil
+			local keybind_direct = nil
+
+			if keybind_idx <= #keybind_sequence_diff then
+				keybind_diff = keybind_sequence_diff[keybind_idx]
+				keybind_to_line_diff[keybind_diff] = line_num
 			end
+
+			if keybind_idx <= #keybind_sequence_direct then
+				keybind_direct = keybind_sequence_direct[keybind_idx]
+				keybind_to_line_direct[keybind_direct] = line_num
+			end
+
+			-- Use lowercase keybind for display
+			local keybind = keybind_diff
+			keybind_idx = keybind_idx + 1
 
 			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
 			table.insert(lines, line)
@@ -236,7 +277,8 @@ local function refresh_menu()
 	state.lines = lines
 	state.selectable_lines = selectable_lines
 	state.line_to_file = line_to_file
-	state.keybind_to_line = keybind_to_line
+	state.keybind_to_line_diff = keybind_to_line_diff
+	state.keybind_to_line_direct = keybind_to_line_direct
 
 	-- Set cursor position (stay at same section + index for natural "next file" behavior)
 	local target_line = nil
@@ -299,7 +341,11 @@ local function open_file()
 	local filepath = file_info.entry.file
 	close_menu()
 
-	-- Open file in previous window
+	-- Clean up any existing diff mode and windows
+	vim.cmd("diffoff!")
+	vim.cmd("only")
+
+	-- Open file in single window
 	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 end
 
@@ -500,12 +546,20 @@ local function setup_keymaps(buf)
 		move_cursor(-1)
 	end, opts)
 
-	-- Dynamic keybinds for quick file access (hh, jj, kk, etc.)
-	for keybind, line_num in pairs(state.keybind_to_line) do
+	-- Dynamic keybinds for quick file access
+	-- Lowercase (hh, jj, kk, etc.) - Opens diff view
+	for keybind, line_num in pairs(state.keybind_to_line_diff) do
 		vim.keymap.set("n", keybind, function()
-			-- Move cursor to the line and open the file
 			update_cursor(line_num)
 			open_diff()
+		end, opts)
+	end
+
+	-- Uppercase (HH, JJ, KK, etc.) - Opens file directly (no diff)
+	for keybind, line_num in pairs(state.keybind_to_line_direct) do
+		vim.keymap.set("n", keybind, function()
+			update_cursor(line_num)
+			open_file()
 		end, opts)
 	end
 
@@ -563,8 +617,9 @@ M.show = function()
 	local line_num = 1
 	local selectable_lines = {}
 	local line_to_file = {}
-	local keybind_to_line = {}
-	local keybind_idx = 1 -- Track keybind assignment (1-25)
+	local keybind_to_line_diff = {}
+	local keybind_to_line_direct = {}
+	local keybind_idx = 1 -- Track keybind assignment
 
 	-- Staged section
 	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
@@ -574,13 +629,23 @@ M.show = function()
 
 	if #status.staged > 0 then
 		for i, entry in ipairs(status.staged) do
-			-- Assign keybind if within limit (25 files max)
-			local keybind = nil
-			if keybind_idx <= #keybind_sequence then
-				keybind = keybind_sequence[keybind_idx]
-				keybind_to_line[keybind] = line_num
-				keybind_idx = keybind_idx + 1
+			-- Assign both lowercase (diff) and uppercase (direct) keybinds
+			local keybind_diff = nil
+			local keybind_direct = nil
+
+			if keybind_idx <= #keybind_sequence_diff then
+				keybind_diff = keybind_sequence_diff[keybind_idx]
+				keybind_to_line_diff[keybind_diff] = line_num
 			end
+
+			if keybind_idx <= #keybind_sequence_direct then
+				keybind_direct = keybind_sequence_direct[keybind_idx]
+				keybind_to_line_direct[keybind_direct] = line_num
+			end
+
+			-- Use lowercase keybind for display
+			local keybind = keybind_diff
+			keybind_idx = keybind_idx + 1
 
 			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
 			table.insert(lines, line)
@@ -602,13 +667,23 @@ M.show = function()
 
 	if #status.unstaged > 0 then
 		for i, entry in ipairs(status.unstaged) do
-			-- Assign keybind if within limit (25 files max)
-			local keybind = nil
-			if keybind_idx <= #keybind_sequence then
-				keybind = keybind_sequence[keybind_idx]
-				keybind_to_line[keybind] = line_num
-				keybind_idx = keybind_idx + 1
+			-- Assign both lowercase (diff) and uppercase (direct) keybinds
+			local keybind_diff = nil
+			local keybind_direct = nil
+
+			if keybind_idx <= #keybind_sequence_diff then
+				keybind_diff = keybind_sequence_diff[keybind_idx]
+				keybind_to_line_diff[keybind_diff] = line_num
 			end
+
+			if keybind_idx <= #keybind_sequence_direct then
+				keybind_direct = keybind_sequence_direct[keybind_idx]
+				keybind_to_line_direct[keybind_direct] = line_num
+			end
+
+			-- Use lowercase keybind for display
+			local keybind = keybind_diff
+			keybind_idx = keybind_idx + 1
 
 			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
 			table.insert(lines, line)
@@ -622,7 +697,8 @@ M.show = function()
 	state.lines = lines
 	state.selectable_lines = selectable_lines
 	state.line_to_file = line_to_file
-	state.keybind_to_line = keybind_to_line
+	state.keybind_to_line_diff = keybind_to_line_diff
+	state.keybind_to_line_direct = keybind_to_line_direct
 
 	-- Set initial cursor position
 	-- Try to restore to last selected file, otherwise go to first selectable line
