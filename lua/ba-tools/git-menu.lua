@@ -88,6 +88,11 @@ local function update_cursor(new_line)
 	-- Update buffer
 	vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
 
+	-- Move vim cursor to the new line
+	if state.win and vim.api.nvim_win_is_valid(state.win) then
+		vim.api.nvim_win_set_cursor(state.win, { new_line, 0 })
+	end
+
 	state.current_line = new_line
 end
 
@@ -206,6 +211,12 @@ local function refresh_menu()
 	-- Update buffer
 	vim.api.nvim_buf_set_option(state.buf, "modifiable", true)
 	vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
+
+	-- Move vim cursor to the current line
+	if state.win and vim.api.nvim_win_is_valid(state.win) and state.current_line then
+		vim.api.nvim_win_set_cursor(state.win, { state.current_line, 0 })
+	end
+
 	vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
 end
 
@@ -398,6 +409,11 @@ M.show = function()
 	-- Set buffer content
 	vim.api.nvim_buf_set_option(state.buf, "modifiable", true)
 	vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
+
+	-- Move vim cursor to initial line
+	if state.win and vim.api.nvim_win_is_valid(state.win) and state.current_line then
+		vim.api.nvim_win_set_cursor(state.win, { state.current_line, 0 })
+	end
 
 	-- Setup keymaps
 	setup_keymaps(state.buf)
