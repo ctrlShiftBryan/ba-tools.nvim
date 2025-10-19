@@ -3,6 +3,9 @@ local git = require("ba-tools.git")
 
 local M = {}
 
+-- Create highlight namespace for selection
+local ns_id = vim.api.nvim_create_namespace("ba-git-menu-selection")
+
 -- Persistent state across menu invocations
 local last_selected_file = nil
 
@@ -72,26 +75,13 @@ local function update_cursor(new_line)
 		return
 	end
 
-	-- Remove cursor from old line
-	if state.current_line and state.current_line >= 1 and state.current_line <= #state.lines then
-		local old_line = state.lines[state.current_line]
-		if old_line:sub(1, 2) == "> " then
-			state.lines[state.current_line] = "  " .. old_line:sub(3)
-		end
-	end
+	-- Clear all existing highlights
+	vim.api.nvim_buf_clear_namespace(state.buf, ns_id, 0, -1)
 
-	-- Add cursor to new line
+	-- Add highlight to new line (0-indexed for line number)
 	if new_line >= 1 and new_line <= #state.lines then
-		local line = state.lines[new_line]
-		if line:sub(1, 2) == "  " then
-			state.lines[new_line] = "> " .. line:sub(3)
-		end
+		vim.api.nvim_buf_add_highlight(state.buf, ns_id, "BaGitMenuSelected", new_line - 1, 0, -1)
 	end
-
-	-- Update buffer
-	vim.api.nvim_buf_set_option(state.buf, "modifiable", true)
-	vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
-	vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
 
 	-- Move vim cursor to the new line
 	if state.win and vim.api.nvim_win_is_valid(state.win) then
@@ -178,7 +168,7 @@ local function refresh_menu()
 
 	if #status.staged > 0 then
 		for i, entry in ipairs(status.staged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, false, max_filename_width)
+			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "staged", index = i, entry = entry }
@@ -198,7 +188,7 @@ local function refresh_menu()
 
 	if #status.unstaged > 0 then
 		for i, entry in ipairs(status.unstaged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, false, max_filename_width)
+			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "unstaged", index = i, entry = entry }
@@ -239,21 +229,21 @@ local function refresh_menu()
 		state.current_line = selectable_lines[1]
 	end
 
-	-- Add cursor indicator
-	if state.current_line and state.lines[state.current_line]:sub(1, 2) == "  " then
-		state.lines[state.current_line] = "> " .. state.lines[state.current_line]:sub(3)
-	end
-
 	-- Update buffer
 	vim.api.nvim_buf_set_option(state.buf, "modifiable", true)
 	vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
+	vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
+
+	-- Apply highlight to current line
+	vim.api.nvim_buf_clear_namespace(state.buf, ns_id, 0, -1)
+	if state.current_line then
+		vim.api.nvim_buf_add_highlight(state.buf, ns_id, "BaGitMenuSelected", state.current_line - 1, 0, -1)
+	end
 
 	-- Move vim cursor to the current line
 	if state.win and vim.api.nvim_win_is_valid(state.win) and state.current_line then
 		vim.api.nvim_win_set_cursor(state.win, { state.current_line, 0 })
 	end
-
-	vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
 end
 
 -- Open the selected file
@@ -427,6 +417,9 @@ end
 
 -- Render the git status menu
 M.show = function()
+	-- Set up highlight group (link to CursorLine for consistent theme integration)
+	vim.api.nvim_set_hl(0, "BaGitMenuSelected", { link = "CursorLine", default = true })
+
 	-- Get git status
 	local status, err = git.get_status()
 	if not status then
@@ -471,7 +464,7 @@ M.show = function()
 
 	if #status.staged > 0 then
 		for i, entry in ipairs(status.staged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, false, max_filename_width)
+			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "staged", index = i, entry = entry }
@@ -491,7 +484,7 @@ M.show = function()
 
 	if #status.unstaged > 0 then
 		for i, entry in ipairs(status.unstaged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, false, max_filename_width)
+			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "unstaged", index = i, entry = entry }
@@ -524,15 +517,17 @@ M.show = function()
 
 	if cursor_line then
 		state.current_line = cursor_line
-		-- Add cursor indicator
-		if state.lines[state.current_line]:sub(1, 2) == "  " then
-			state.lines[state.current_line] = "> " .. state.lines[state.current_line]:sub(3)
-		end
 	end
 
 	-- Set buffer content
 	vim.api.nvim_buf_set_option(state.buf, "modifiable", true)
 	vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
+	vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
+
+	-- Apply highlight to initial cursor line
+	if state.current_line then
+		vim.api.nvim_buf_add_highlight(state.buf, ns_id, "BaGitMenuSelected", state.current_line - 1, 0, -1)
+	end
 
 	-- Move vim cursor to initial line
 	if state.win and vim.api.nvim_win_is_valid(state.win) and state.current_line then

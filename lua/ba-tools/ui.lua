@@ -47,7 +47,7 @@ end
 -- Format a file entry for display in three columns:
 -- "  filename.ts      path/to/dir/    A"
 -- Uses consistent column widths across all files (based on max_filename_width)
-M.format_file_line = function(filepath, status, width, is_selected, max_filename_width)
+M.format_file_line = function(filepath, status, width, max_filename_width)
 	local filename = vim.fn.fnamemodify(filepath, ":t")
 	local dir = vim.fn.fnamemodify(filepath, ":h")
 
@@ -59,7 +59,7 @@ M.format_file_line = function(filepath, status, width, is_selected, max_filename
 		dir = dir .. "/"
 	end
 
-	local prefix = is_selected and "> " or "  "
+	local prefix = "  "
 	local spacing = "  " -- Space between filename and path
 	local status_col = "  " .. status
 
