@@ -44,10 +44,10 @@ M.create_centered_window = function(title, width_ratio, height_ratio)
 	}
 end
 
--- Format a file entry for display in three columns:
--- "  filename.ts      path/to/dir/    A"
+-- Format a file entry for display with keybind and columns:
+-- "(hh) filename.ts      path/to/dir/    A"
 -- Uses consistent column widths across all files (based on max_filename_width)
-M.format_file_line = function(filepath, status, width, max_filename_width)
+M.format_file_line = function(filepath, status, width, max_filename_width, keybind)
 	local filename = vim.fn.fnamemodify(filepath, ":t")
 	local dir = vim.fn.fnamemodify(filepath, ":h")
 
@@ -59,7 +59,8 @@ M.format_file_line = function(filepath, status, width, max_filename_width)
 		dir = dir .. "/"
 	end
 
-	local prefix = "  "
+	-- Keybind column: "(hh) " or "     " if no keybind
+	local keybind_col = keybind and string.format("(%s) ", keybind) or "     "
 	local spacing = "  " -- Space between filename and path
 	local status_col = "  " .. status
 
@@ -72,8 +73,8 @@ M.format_file_line = function(filepath, status, width, max_filename_width)
 	local padded_filename = filename .. string.rep(" ", filename_padding)
 
 	-- Calculate available space for path
-	-- total_width = prefix + max_filename_width + spacing + path + status_col
-	local used = #prefix + max_filename_width + #spacing + #status_col
+	-- total_width = keybind_col + max_filename_width + spacing + path + status_col
+	local used = #keybind_col + max_filename_width + #spacing + #status_col
 	local path_space = width - used
 
 	-- Truncate path if it doesn't fit
@@ -94,7 +95,7 @@ M.format_file_line = function(filepath, status, width, max_filename_width)
 		path_padding = 0
 	end
 
-	return prefix .. padded_filename .. spacing .. display_path .. string.rep(" ", path_padding) .. status_col
+	return keybind_col .. padded_filename .. spacing .. display_path .. string.rep(" ", path_padding) .. status_col
 end
 
 return M

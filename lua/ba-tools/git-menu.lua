@@ -6,6 +6,22 @@ local M = {}
 -- Create highlight namespace for selection
 local ns_id = vim.api.nvim_create_namespace("ba-git-menu-selection")
 
+-- Ergonomic two-character keybind pattern using hjkl; home row (25 total)
+local keybind_sequence = {
+	-- Same key (easiest)
+	"hh", "jj", "kk", "ll", ";;",
+	-- Adjacent outward roll
+	"hj", "jk", "kl", "l;",
+	-- Adjacent inward roll
+	"jh", "kj", "lk", ";l",
+	-- Skip one outward
+	"hk", "jl", "k;",
+	-- Skip one inward
+	"kh", "lj", ";k",
+	-- Remaining combinations
+	"hl", "lh", "h;", ";h", "j;", ";j"
+}
+
 -- Persistent state across menu invocations
 local last_selected_file = nil
 
@@ -18,6 +34,7 @@ local state = {
 	lines = {},
 	line_to_file = {}, -- Map line number to file entry
 	selectable_lines = {}, -- Lines that can be selected
+	keybind_to_line = {}, -- Map keybind to line number
 }
 
 -- Reset state
@@ -30,6 +47,7 @@ local function reset_state()
 		lines = {},
 		line_to_file = {},
 		selectable_lines = {},
+		keybind_to_line = {},
 	}
 end
 
@@ -159,6 +177,8 @@ local function refresh_menu()
 	local line_num = 1
 	local selectable_lines = {}
 	local line_to_file = {}
+	local keybind_to_line = {}
+	local keybind_idx = 1 -- Track keybind assignment (1-25)
 
 	-- Staged section
 	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
@@ -168,7 +188,15 @@ local function refresh_menu()
 
 	if #status.staged > 0 then
 		for i, entry in ipairs(status.staged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width)
+			-- Assign keybind if within limit (25 files max)
+			local keybind = nil
+			if keybind_idx <= #keybind_sequence then
+				keybind = keybind_sequence[keybind_idx]
+				keybind_to_line[keybind] = line_num
+				keybind_idx = keybind_idx + 1
+			end
+
+			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "staged", index = i, entry = entry }
@@ -188,7 +216,15 @@ local function refresh_menu()
 
 	if #status.unstaged > 0 then
 		for i, entry in ipairs(status.unstaged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width)
+			-- Assign keybind if within limit (25 files max)
+			local keybind = nil
+			if keybind_idx <= #keybind_sequence then
+				keybind = keybind_sequence[keybind_idx]
+				keybind_to_line[keybind] = line_num
+				keybind_idx = keybind_idx + 1
+			end
+
+			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "unstaged", index = i, entry = entry }
@@ -200,6 +236,7 @@ local function refresh_menu()
 	state.lines = lines
 	state.selectable_lines = selectable_lines
 	state.line_to_file = line_to_file
+	state.keybind_to_line = keybind_to_line
 
 	-- Set cursor position (stay at same section + index for natural "next file" behavior)
 	local target_line = nil
@@ -451,23 +488,14 @@ end
 local function setup_keymaps(buf)
 	local opts = { buffer = buf, nowait = true, silent = true }
 
-	-- Navigation
-	vim.keymap.set("n", "j", function()
-		move_cursor(1)
-	end, opts)
-
-	vim.keymap.set("n", "k", function()
-		move_cursor(-1)
-	end, opts)
-
-	-- Arrow keys (same as j/k)
-	vim.keymap.set("n", "<Down>", function()
-		move_cursor(1)
-	end, opts)
-
-	vim.keymap.set("n", "<Up>", function()
-		move_cursor(-1)
-	end, opts)
+	-- Dynamic keybinds for quick file access (hh, jj, kk, etc.)
+	for keybind, line_num in pairs(state.keybind_to_line) do
+		vim.keymap.set("n", keybind, function()
+			-- Move cursor to the line and open the file
+			update_cursor(line_num)
+			open_diff()
+		end, opts)
+	end
 
 	-- Actions
 	vim.keymap.set("n", "<CR>", open_diff, opts)
@@ -523,6 +551,8 @@ M.show = function()
 	local line_num = 1
 	local selectable_lines = {}
 	local line_to_file = {}
+	local keybind_to_line = {}
+	local keybind_idx = 1 -- Track keybind assignment (1-25)
 
 	-- Staged section
 	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
@@ -532,7 +562,15 @@ M.show = function()
 
 	if #status.staged > 0 then
 		for i, entry in ipairs(status.staged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width)
+			-- Assign keybind if within limit (25 files max)
+			local keybind = nil
+			if keybind_idx <= #keybind_sequence then
+				keybind = keybind_sequence[keybind_idx]
+				keybind_to_line[keybind] = line_num
+				keybind_idx = keybind_idx + 1
+			end
+
+			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "staged", index = i, entry = entry }
@@ -552,7 +590,15 @@ M.show = function()
 
 	if #status.unstaged > 0 then
 		for i, entry in ipairs(status.unstaged) do
-			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width)
+			-- Assign keybind if within limit (25 files max)
+			local keybind = nil
+			if keybind_idx <= #keybind_sequence then
+				keybind = keybind_sequence[keybind_idx]
+				keybind_to_line[keybind] = line_num
+				keybind_idx = keybind_idx + 1
+			end
+
+			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "unstaged", index = i, entry = entry }
@@ -564,6 +610,7 @@ M.show = function()
 	state.lines = lines
 	state.selectable_lines = selectable_lines
 	state.line_to_file = line_to_file
+	state.keybind_to_line = keybind_to_line
 
 	-- Set initial cursor position
 	-- Try to restore to last selected file, otherwise go to first selectable line
