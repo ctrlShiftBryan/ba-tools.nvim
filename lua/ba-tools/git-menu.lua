@@ -3,6 +3,9 @@ local git = require("ba-tools.git")
 
 local M = {}
 
+-- Persistent state across menu invocations
+local last_selected_file = nil
+
 -- State for the current menu instance
 local state = {
 	buf = nil,
@@ -96,6 +99,12 @@ local function update_cursor(new_line)
 	end
 
 	state.current_line = new_line
+
+	-- Remember last selected file for next time
+	local file_info = state.line_to_file[new_line]
+	if file_info then
+		last_selected_file = file_info.entry.file
+	end
 end
 
 -- Move cursor
@@ -399,9 +408,26 @@ M.show = function()
 	state.selectable_lines = selectable_lines
 	state.line_to_file = line_to_file
 
-	-- Set initial cursor position to first selectable line
-	if #selectable_lines > 0 then
-		state.current_line = selectable_lines[1]
+	-- Set initial cursor position
+	-- Try to restore to last selected file, otherwise go to first selectable line
+	local cursor_line = nil
+	if last_selected_file then
+		-- Find the line with this file
+		for line, file_info in pairs(line_to_file) do
+			if file_info.entry.file == last_selected_file then
+				cursor_line = line
+				break
+			end
+		end
+	end
+
+	-- Fall back to first selectable line if file not found
+	if not cursor_line and #selectable_lines > 0 then
+		cursor_line = selectable_lines[1]
+	end
+
+	if cursor_line then
+		state.current_line = cursor_line
 		-- Add cursor indicator
 		if state.lines[state.current_line]:sub(1, 2) == "  " then
 			state.lines[state.current_line] = "> " .. state.lines[state.current_line]:sub(3)
