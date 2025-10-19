@@ -362,6 +362,9 @@ local function open_diff()
 	-- Close menu
 	close_menu()
 
+	-- Close all other windows to ensure clean diff setup (only 2 windows)
+	vim.cmd("only")
+
 	-- Open the file
 	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 
