@@ -147,9 +147,8 @@ local function refresh_menu()
 		return
 	end
 
-	-- Remember currently selected file path
-	local current_file_info = get_current_file()
-	local current_filepath = current_file_info and current_file_info.entry.file or nil
+	-- Remember current line number to maintain position after refresh
+	local target_line = state.current_line
 
 	-- First pass: Calculate max filename width for consistent columns
 	local max_filename_width = 0
@@ -167,7 +166,6 @@ local function refresh_menu()
 	local line_num = 1
 	local selectable_lines = {}
 	local line_to_file = {}
-	local new_cursor_line = nil
 
 	-- Staged section
 	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
@@ -181,12 +179,6 @@ local function refresh_menu()
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "staged", index = i, entry = entry }
-
-			-- Try to restore cursor to same file
-			if current_filepath and entry.file == current_filepath and not new_cursor_line then
-				new_cursor_line = line_num
-			end
-
 			line_num = line_num + 1
 		end
 	end
@@ -207,12 +199,6 @@ local function refresh_menu()
 			table.insert(lines, line)
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "unstaged", index = i, entry = entry }
-
-			-- Try to restore cursor to same file
-			if current_filepath and entry.file == current_filepath and not new_cursor_line then
-				new_cursor_line = line_num
-			end
-
 			line_num = line_num + 1
 		end
 	end
@@ -222,11 +208,16 @@ local function refresh_menu()
 	state.selectable_lines = selectable_lines
 	state.line_to_file = line_to_file
 
-	-- Set cursor position (restore to same file or first selectable line)
-	if new_cursor_line and is_selectable(new_cursor_line) then
-		state.current_line = new_cursor_line
+	-- Set cursor position (stay at same line number, or closest selectable line)
+	if target_line and target_line <= #lines and is_selectable(target_line) then
+		-- Target line is still valid and selectable
+		state.current_line = target_line
+	elseif target_line and target_line <= #lines then
+		-- Target line exists but isn't selectable, find nearest selectable
+		state.current_line = find_next_selectable(target_line, 1)
 	elseif #selectable_lines > 0 then
-		state.current_line = selectable_lines[1]
+		-- Target line is beyond end of list, use last selectable line
+		state.current_line = selectable_lines[#selectable_lines]
 	end
 
 	-- Add cursor indicator
