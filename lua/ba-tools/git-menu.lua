@@ -503,7 +503,7 @@ M.show = function()
 	if last_selected_file then
 		-- Find the line with this file
 		for line, file_info in pairs(line_to_file) do
-			if file_info.entry.file == last_selected_file then
+			if not file_info.is_category and file_info.entry and file_info.entry.file == last_selected_file then
 				cursor_line = line
 				break
 			end
