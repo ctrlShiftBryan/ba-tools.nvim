@@ -44,58 +44,52 @@ M.create_centered_window = function(title, width_ratio, height_ratio)
 	}
 end
 
--- Format a file entry for display
+-- Format a file entry for display in three columns:
+-- "  filename.ts      path/to/dir/    A"
 M.format_file_line = function(filepath, status, width, is_selected)
 	local filename = vim.fn.fnamemodify(filepath, ":t")
 	local dir = vim.fn.fnamemodify(filepath, ":h")
 
-	-- Show just filename if in current directory
+	-- Show empty string if in current directory
 	if dir == "." then
 		dir = ""
+	else
+		-- Add trailing slash to directory
+		dir = dir .. "/"
 	end
 
-	-- Calculate spacing
-	-- Format: "  filename" + spaces + "dir   status"
 	local prefix = is_selected and "> " or "  "
-	local suffix = "   " .. status
 
-	-- Available space for filename and directory
-	local available = width - #prefix - #suffix - 3 -- 3 for spacing
+	-- Column widths (approximate percentages of available width)
+	-- prefix (2) + filename (35%) + space (2) + path (50%) + space (2) + status (3)
+	local available = width - #prefix - 7 -- 7 = spaces and status column
+	local filename_width = math.floor(available * 0.35)
+	local path_width = available - filename_width
 
+	-- Truncate filename if needed
+	local display_filename = filename
+	if #filename > filename_width then
+		display_filename = filename:sub(1, filename_width - 3) .. "..."
+	end
+
+	-- Truncate path if needed
 	local display_path = dir
-	if #dir > 0 then
-		display_path = dir .. "/"
-	end
-	display_path = display_path .. filename
-
-	-- Truncate if too long
-	if #display_path > available then
-		local max_filename = math.floor(available * 0.6)
-		local max_dir = available - max_filename - 3 -- 3 for "..."
-
-		if #filename > max_filename then
-			filename = filename:sub(1, max_filename - 3) .. "..."
-		end
-
-		if #dir > max_dir and #dir > 0 then
-			dir = "..." .. dir:sub(-(max_dir - 3))
-		end
-
-		display_path = dir
-		if #dir > 0 then
-			display_path = display_path .. "/"
-		end
-		display_path = display_path .. filename
+	if #dir > path_width then
+		-- Show end of path (most relevant part)
+		display_path = "..." .. dir:sub(-(path_width - 3))
 	end
 
-	-- Calculate remaining space for padding
-	local padding_needed = width - #prefix - #display_path - #suffix
-	if padding_needed < 0 then
-		padding_needed = 0
-	end
-	local padding = string.rep(" ", padding_needed)
+	-- Build the line with proper spacing
+	-- Column 1: filename (left-aligned, fixed width)
+	local col1 = display_filename .. string.rep(" ", filename_width - #display_filename)
 
-	return prefix .. display_path .. padding .. suffix
+	-- Column 2: path (left-aligned in its space)
+	local col2 = display_path .. string.rep(" ", path_width - #display_path)
+
+	-- Column 3: status (right-aligned, 3 chars wide)
+	local col3 = "  " .. status
+
+	return prefix .. col1 .. "  " .. col2 .. col3
 end
 
 return M
