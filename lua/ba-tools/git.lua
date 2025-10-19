@@ -52,11 +52,11 @@ M.get_status = function()
 
 			-- Handle unstaged changes
 			if unstaged_char ~= " " or status_code == "??" then
-				local status_display = "U" -- Default to unstaged
+				local status_display = "M" -- Default to modified
 				if status_code == "??" then
 					status_display = "U" -- Untracked
 				elseif unstaged_char == "M" then
-					status_display = "U"
+					status_display = "M" -- Modified
 				elseif unstaged_char == "D" then
 					status_display = "D"
 				end
