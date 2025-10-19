@@ -353,9 +353,10 @@ local function open_diff()
 	local filepath = file_info.entry.file
 	local is_untracked = file_info.entry.status == "U"
 
-	-- Cannot diff untracked files (no previous version to compare against)
+	-- For untracked files, just open them normally (no diff to show)
 	if is_untracked then
-		vim.notify("Cannot diff untracked file. No previous version exists.", vim.log.levels.WARN)
+		close_menu()
+		vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 		return
 	end
 

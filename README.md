@@ -45,9 +45,9 @@ Opens a centered floating window showing git status with staged and unstaged cha
 
 **Keymaps:**
 - `j`/`k` or `↓`/`↑` - Navigate up/down (includes category headers)
-- `<Enter>` - Open diff (native vim diff mode)
-  - Shows HEAD version vs working copy in vertical split
-  - Only works for modified files (not untracked files)
+- `<Enter>` - Open file
+  - Modified files: Opens in diff mode (HEAD vs working copy)
+  - Untracked files: Opens normally (no diff available)
   - Closes git menu automatically
 - `o` - Open file in editor (without diff)
 - `s` - Stage/unstage
