@@ -533,6 +533,64 @@ local function discard_changes()
 	end
 end
 
+-- Stage all unstaged files at the current file's path
+local function stage_path()
+	local file_info = get_current_file()
+	if not file_info then
+		return
+	end
+
+	-- Cannot use on category
+	if file_info.is_category then
+		vim.notify("Cannot stage path from category. Select a file.", vim.log.levels.WARN)
+		return
+	end
+
+	local filepath = file_info.entry.file
+	local dir = vim.fn.fnamemodify(filepath, ":h")
+
+	-- Get current git status
+	local status, err = git.get_status()
+	if not status then
+		vim.notify("Failed to get git status: " .. (err or "unknown error"), vim.log.levels.ERROR)
+		return
+	end
+
+	-- Find all unstaged files in the same directory
+	local files_to_stage = {}
+	for _, entry in ipairs(status.unstaged) do
+		local entry_dir = vim.fn.fnamemodify(entry.file, ":h")
+		if entry_dir == dir then
+			table.insert(files_to_stage, entry.file)
+		end
+	end
+
+	-- Check if there are any files to stage
+	if #files_to_stage == 0 then
+		vim.notify("No unstaged files at path: " .. dir, vim.log.levels.INFO)
+		return
+	end
+
+	-- Stage all files
+	local failed = {}
+	for _, file in ipairs(files_to_stage) do
+		local success, stage_err = git.stage_file(file)
+		if not success then
+			table.insert(failed, file)
+		end
+	end
+
+	-- Show notification
+	if #failed == 0 then
+		vim.notify(string.format("Staged %d files at %s", #files_to_stage, dir), vim.log.levels.INFO)
+	else
+		vim.notify(string.format("Failed to stage %d files", #failed), vim.log.levels.ERROR)
+	end
+
+	-- Refresh the menu
+	refresh_menu()
+end
+
 -- Setup keymaps for the menu
 local function setup_keymaps(buf)
 	local opts = { buffer = buf, nowait = true, silent = true }
@@ -568,6 +626,7 @@ local function setup_keymaps(buf)
 	vim.keymap.set("n", "o", open_file, opts)
 	vim.keymap.set("n", "s", toggle_stage, opts)
 	vim.keymap.set("n", "d", discard_changes, opts)
+	vim.keymap.set("n", "p", stage_path, opts)
 
 	-- Close
 	vim.keymap.set("n", "q", close_menu, opts)

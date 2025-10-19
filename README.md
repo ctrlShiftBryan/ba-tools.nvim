@@ -59,6 +59,10 @@ Opens a centered floating window showing git status with staged and unstaged cha
 - `s` - Stage/unstage
   - On a file: Stage (if unstaged) or unstage (if staged)
   - On a category header: Stage/unstage ALL files in that category
+- `p` - Stage all unstaged files at current path
+  - Stages all unstaged files in the same directory as the selected file
+  - Useful for staging related files at once (e.g., all files in `app/context/PlayerId/`)
+  - Not available on category headers
 - `d` - Discard changes to file (with confirmation prompt)
   - For untracked files: deletes the file
   - For tracked files: restores from HEAD
