@@ -25,4 +25,10 @@ M.file_info = function()
 	print(string.format("File: %s\nType: %s", filepath, filetype))
 end
 
+-- Show git status menu
+M.git_menu = function()
+	local git_menu = require("ba-tools.git-menu")
+	git_menu.show()
+end
+
 return M
