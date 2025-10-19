@@ -362,6 +362,9 @@ local function open_diff()
 	-- Close menu
 	close_menu()
 
+	-- Turn off diff mode in all windows before cleanup
+	vim.cmd("diffoff!")
+
 	-- Close all other windows to ensure clean diff setup (only 2 windows)
 	vim.cmd("only")
 
