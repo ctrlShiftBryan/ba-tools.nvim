@@ -86,7 +86,9 @@ local function update_cursor(new_line)
 	end
 
 	-- Update buffer
+	vim.api.nvim_buf_set_option(state.buf, "modifiable", true)
 	vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
+	vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
 
 	-- Move vim cursor to the new line
 	if state.win and vim.api.nvim_win_is_valid(state.win) then
