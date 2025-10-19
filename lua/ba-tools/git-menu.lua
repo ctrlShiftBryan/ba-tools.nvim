@@ -337,8 +337,8 @@ local function toggle_stage()
 	end
 end
 
--- Open diff view for the selected file
-local function open_diff()
+-- Open diff view with DiffviewOpen HEAD (Option 1)
+local function open_diff_diffview()
 	local file_info = get_current_file()
 	if not file_info then
 		return
@@ -359,9 +359,100 @@ local function open_diff()
 		return
 	end
 
-	-- Open diffview file history for this file
-	-- DiffviewFileHistory shows changes for a specific file only
-	vim.cmd("DiffviewFileHistory " .. vim.fn.fnameescape(filepath))
+	-- Open diffview for HEAD vs working directory for this file
+	vim.cmd("DiffviewOpen HEAD -- " .. vim.fn.fnameescape(filepath))
+end
+
+-- Open diff with gitsigns (Option 2)
+local function open_diff_gitsigns()
+	local file_info = get_current_file()
+	if not file_info then
+		return
+	end
+
+	-- Cannot diff a category
+	if file_info.is_category then
+		vim.notify("Cannot open diff for category. Select individual files.", vim.log.levels.WARN)
+		return
+	end
+
+	local filepath = file_info.entry.file
+	local is_untracked = file_info.entry.status == "U"
+
+	-- Cannot diff untracked files (no previous version to compare against)
+	if is_untracked then
+		vim.notify("Cannot diff untracked file. No previous version exists.", vim.log.levels.WARN)
+		return
+	end
+
+	-- Close menu and open the file
+	close_menu()
+
+	-- Open the file
+	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
+
+	-- Use gitsigns to show diff against HEAD
+	require('gitsigns').diffthis('HEAD')
+end
+
+-- Open diff with native vim diff (Option 3)
+local function open_diff_native()
+	local file_info = get_current_file()
+	if not file_info then
+		return
+	end
+
+	-- Cannot diff a category
+	if file_info.is_category then
+		vim.notify("Cannot open diff for category. Select individual files.", vim.log.levels.WARN)
+		return
+	end
+
+	local filepath = file_info.entry.file
+	local is_untracked = file_info.entry.status == "U"
+
+	-- Cannot diff untracked files (no previous version to compare against)
+	if is_untracked then
+		vim.notify("Cannot diff untracked file. No previous version exists.", vim.log.levels.WARN)
+		return
+	end
+
+	-- Close menu
+	close_menu()
+
+	-- Open the file
+	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
+
+	-- Get HEAD version of the file
+	local head_content = vim.fn.system("git show HEAD:" .. vim.fn.shellescape(filepath))
+
+	if vim.v.shell_error ~= 0 then
+		vim.notify("Failed to get HEAD version of file", vim.log.levels.ERROR)
+		return
+	end
+
+	-- Create a temporary buffer for HEAD version
+	vim.cmd("vertical new")
+	local head_buf = vim.api.nvim_get_current_buf()
+	vim.api.nvim_buf_set_name(head_buf, filepath .. " (HEAD)")
+
+	-- Set buffer options
+	vim.api.nvim_buf_set_option(head_buf, "buftype", "nofile")
+	vim.api.nvim_buf_set_option(head_buf, "bufhidden", "wipe")
+	vim.api.nvim_buf_set_option(head_buf, "swapfile", false)
+
+	-- Set the content
+	local lines = vim.split(head_content, "\n")
+	vim.api.nvim_buf_set_lines(head_buf, 0, -1, false, lines)
+
+	-- Set filetype to match the original file
+	local ft = vim.bo.filetype
+	vim.api.nvim_buf_set_option(head_buf, "filetype", ft)
+
+	-- Enable diff mode on both buffers
+	vim.cmd("diffthis")
+	vim.cmd("wincmd p")  -- Go back to working file
+	vim.cmd("diffthis")
 end
 
 -- Discard changes to the selected file
@@ -433,7 +524,9 @@ local function setup_keymaps(buf)
 	vim.keymap.set("n", "<CR>", open_file, opts)
 	vim.keymap.set("n", "s", toggle_stage, opts)
 	vim.keymap.set("n", "d", discard_changes, opts)
-	vim.keymap.set("n", "p", open_diff, opts)
+	vim.keymap.set("n", "p", open_diff_diffview, opts)
+	vim.keymap.set("n", "o", open_diff_gitsigns, opts)
+	vim.keymap.set("n", "i", open_diff_native, opts)
 
 	-- Close
 	vim.keymap.set("n", "q", close_menu, opts)
