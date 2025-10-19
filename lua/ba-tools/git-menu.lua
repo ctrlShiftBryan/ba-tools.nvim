@@ -337,6 +337,33 @@ local function toggle_stage()
 	end
 end
 
+-- Open diff view for the selected file
+local function open_diff()
+	local file_info = get_current_file()
+	if not file_info then
+		return
+	end
+
+	-- Cannot diff a category
+	if file_info.is_category then
+		vim.notify("Cannot open diff for category. Select individual files.", vim.log.levels.WARN)
+		return
+	end
+
+	local filepath = file_info.entry.file
+	local is_untracked = file_info.entry.status == "U"
+
+	-- Cannot diff untracked files (no previous version to compare against)
+	if is_untracked then
+		vim.notify("Cannot diff untracked file. No previous version exists.", vim.log.levels.WARN)
+		return
+	end
+
+	-- Open diffview for this file
+	-- DiffviewOpen with a path shows the diff for that specific file
+	vim.cmd("DiffviewOpen -- " .. vim.fn.fnameescape(filepath))
+end
+
 -- Discard changes to the selected file
 local function discard_changes()
 	local file_info = get_current_file()
@@ -406,6 +433,7 @@ local function setup_keymaps(buf)
 	vim.keymap.set("n", "<CR>", open_file, opts)
 	vim.keymap.set("n", "s", toggle_stage, opts)
 	vim.keymap.set("n", "d", discard_changes, opts)
+	vim.keymap.set("n", "p", open_diff, opts)
 
 	-- Close
 	vim.keymap.set("n", "q", close_menu, opts)

@@ -54,6 +54,10 @@ Opens a centered floating window showing git status with staged and unstaged cha
   - For tracked files: restores from HEAD
   - Cannot discard staged changes (unstage first with `s`)
   - Not available on category headers
+- `p` - Preview diff (opens diffview.nvim)
+  - Shows full diff of changes for the file
+  - Only works for modified files (not untracked files)
+  - Not available on category headers
 - `q`/`<Esc>` - Close menu
 
 **Bulk Operations:**
