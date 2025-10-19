@@ -105,6 +105,197 @@ local function close_menu()
 	reset_state()
 end
 
+-- Get currently selected file
+local function get_current_file()
+	local file_info = state.line_to_file[state.current_line]
+	if not file_info then
+		return nil
+	end
+	return file_info
+end
+
+-- Refresh the menu (rebuild contents)
+local function refresh_menu()
+	-- Get git status
+	local status, err = git.get_status()
+	if not status then
+		vim.notify("ba-tools: " .. (err or "Failed to get git status"), vim.log.levels.ERROR)
+		close_menu()
+		return
+	end
+
+	-- If no changes, close the menu
+	if #status.staged == 0 and #status.unstaged == 0 then
+		vim.notify("No changes to display", vim.log.levels.INFO)
+		close_menu()
+		return
+	end
+
+	-- Remember currently selected file path
+	local current_file_info = get_current_file()
+	local current_filepath = current_file_info and current_file_info.entry.file or nil
+
+	-- Build lines
+	local lines = {}
+	local line_num = 1
+	local selectable_lines = {}
+	local line_to_file = {}
+	local new_cursor_line = nil
+
+	-- Staged section
+	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
+	line_num = line_num + 1
+
+	if #status.staged > 0 then
+		for i, entry in ipairs(status.staged) do
+			local line = ui.format_file_line(entry.file, entry.status, state.width, false)
+			table.insert(lines, line)
+			table.insert(selectable_lines, line_num)
+			line_to_file[line_num] = { section = "staged", index = i, entry = entry }
+
+			-- Try to restore cursor to same file
+			if current_filepath and entry.file == current_filepath and not new_cursor_line then
+				new_cursor_line = line_num
+			end
+
+			line_num = line_num + 1
+		end
+	end
+
+	-- Empty line separator
+	table.insert(lines, "")
+	line_num = line_num + 1
+
+	-- Unstaged section
+	table.insert(lines, string.format("Changes (%d)", #status.unstaged))
+	line_num = line_num + 1
+
+	if #status.unstaged > 0 then
+		for i, entry in ipairs(status.unstaged) do
+			local line = ui.format_file_line(entry.file, entry.status, state.width, false)
+			table.insert(lines, line)
+			table.insert(selectable_lines, line_num)
+			line_to_file[line_num] = { section = "unstaged", index = i, entry = entry }
+
+			-- Try to restore cursor to same file
+			if current_filepath and entry.file == current_filepath and not new_cursor_line then
+				new_cursor_line = line_num
+			end
+
+			line_num = line_num + 1
+		end
+	end
+
+	-- Store state
+	state.lines = lines
+	state.selectable_lines = selectable_lines
+	state.line_to_file = line_to_file
+
+	-- Set cursor position (restore to same file or first selectable line)
+	if new_cursor_line and is_selectable(new_cursor_line) then
+		state.current_line = new_cursor_line
+	elseif #selectable_lines > 0 then
+		state.current_line = selectable_lines[1]
+	end
+
+	-- Add cursor indicator
+	if state.current_line and state.lines[state.current_line]:sub(1, 2) == "  " then
+		state.lines[state.current_line] = "> " .. state.lines[state.current_line]:sub(3)
+	end
+
+	-- Update buffer
+	vim.api.nvim_buf_set_option(state.buf, "modifiable", true)
+	vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
+	vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
+end
+
+-- Open the selected file
+local function open_file()
+	local file_info = get_current_file()
+	if not file_info then
+		return
+	end
+
+	local filepath = file_info.entry.file
+	close_menu()
+
+	-- Open file in previous window
+	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
+end
+
+-- Stage or unstage the selected file
+local function toggle_stage()
+	local file_info = get_current_file()
+	if not file_info then
+		return
+	end
+
+	local filepath = file_info.entry.file
+	local section = file_info.section
+
+	local success, err
+
+	if section == "staged" then
+		-- Unstage the file
+		success, err = git.unstage_file(filepath)
+		if success then
+			vim.notify("Unstaged: " .. filepath, vim.log.levels.INFO)
+		else
+			vim.notify(err, vim.log.levels.ERROR)
+		end
+	else
+		-- Stage the file
+		success, err = git.stage_file(filepath)
+		if success then
+			vim.notify("Staged: " .. filepath, vim.log.levels.INFO)
+		else
+			vim.notify(err, vim.log.levels.ERROR)
+		end
+	end
+
+	-- Refresh the menu
+	if success then
+		refresh_menu()
+	end
+end
+
+-- Discard changes to the selected file
+local function discard_changes()
+	local file_info = get_current_file()
+	if not file_info then
+		return
+	end
+
+	local filepath = file_info.entry.file
+	local section = file_info.section
+
+	-- Can only discard unstaged changes
+	if section == "staged" then
+		vim.notify("Cannot discard staged changes. Unstage first with 's'", vim.log.levels.WARN)
+		return
+	end
+
+	-- Check if file is untracked
+	local is_untracked = file_info.entry.status == "U"
+
+	-- Confirm before discarding
+	local action = is_untracked and "delete" or "discard changes to"
+	local choice = vim.fn.confirm(string.format("Are you sure you want to %s '%s'?", action, filepath), "&Yes\n&No", 2)
+
+	if choice ~= 1 then
+		return
+	end
+
+	-- Discard the changes
+	local success, err = git.discard_file(filepath, is_untracked)
+	if success then
+		vim.notify((is_untracked and "Deleted: " or "Discarded: ") .. filepath, vim.log.levels.INFO)
+		refresh_menu()
+	else
+		vim.notify(err, vim.log.levels.ERROR)
+	end
+end
+
 -- Setup keymaps for the menu
 local function setup_keymaps(buf)
 	local opts = { buffer = buf, nowait = true, silent = true }
@@ -117,6 +308,11 @@ local function setup_keymaps(buf)
 	vim.keymap.set("n", "k", function()
 		move_cursor(-1)
 	end, opts)
+
+	-- Actions
+	vim.keymap.set("n", "<CR>", open_file, opts)
+	vim.keymap.set("n", "s", toggle_stage, opts)
+	vim.keymap.set("n", "d", discard_changes, opts)
 
 	-- Close
 	vim.keymap.set("n", "q", close_menu, opts)
@@ -132,6 +328,12 @@ M.show = function()
 	local status, err = git.get_status()
 	if not status then
 		vim.notify("ba-tools: " .. (err or "Failed to get git status"), vim.log.levels.ERROR)
+		return
+	end
+
+	-- Check if there are any changes
+	if #status.staged == 0 and #status.unstaged == 0 then
+		vim.notify("No changes to display", vim.log.levels.INFO)
 		return
 	end
 

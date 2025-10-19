@@ -74,4 +74,42 @@ M.get_status = function()
 	}
 end
 
+-- Stage a file
+M.stage_file = function(filepath)
+	local cmd = string.format("git add %s 2>&1", vim.fn.shellescape(filepath))
+	local output = vim.fn.system(cmd)
+	if vim.v.shell_error ~= 0 then
+		return false, "Failed to stage file: " .. output
+	end
+	return true
+end
+
+-- Unstage a file
+M.unstage_file = function(filepath)
+	local cmd = string.format("git restore --staged %s 2>&1", vim.fn.shellescape(filepath))
+	local output = vim.fn.system(cmd)
+	if vim.v.shell_error ~= 0 then
+		return false, "Failed to unstage file: " .. output
+	end
+	return true
+end
+
+-- Discard changes to a file
+M.discard_file = function(filepath, is_untracked)
+	local cmd
+	if is_untracked then
+		-- For untracked files, just remove them
+		cmd = string.format("rm -rf %s 2>&1", vim.fn.shellescape(filepath))
+	else
+		-- For tracked files, restore from HEAD
+		cmd = string.format("git restore %s 2>&1", vim.fn.shellescape(filepath))
+	end
+
+	local output = vim.fn.system(cmd)
+	if vim.v.shell_error ~= 0 then
+		return false, "Failed to discard changes: " .. output
+	end
+	return true
+end
+
 return M

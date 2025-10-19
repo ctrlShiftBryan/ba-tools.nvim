@@ -39,7 +39,19 @@ Opens a centered floating window showing git status with staged and unstaged cha
 - Shows unstaged changes with count
 - Navigate with `j`/`k` keys
 - Visual cursor indicator (`>`)
+- Interactive file operations
+- Auto-refresh after operations
 - Close with `ESC` or `q`
+
+**Keymaps:**
+- `j`/`k` - Navigate up/down
+- `<Enter>` - Open selected file in editor
+- `s` - Stage file (if unstaged) or unstage file (if staged)
+- `d` - Discard changes to file (with confirmation prompt)
+  - For untracked files: deletes the file
+  - For tracked files: restores from HEAD
+  - Cannot discard staged changes (unstage first with `s`)
+- `q`/`<Esc>` - Close menu
 
 **Usage:** Press `<leader>tg` to open the git menu.
 
