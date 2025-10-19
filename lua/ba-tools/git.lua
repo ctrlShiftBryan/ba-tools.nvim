@@ -9,7 +9,8 @@ M.get_status = function()
 	end
 
 	-- Run git status with porcelain format for reliable parsing
-	local output = vim.fn.system("git status --porcelain=v1 2>/dev/null")
+	-- -u flag: show untracked files individually (not grouped by directory)
+	local output = vim.fn.system("git status --porcelain=v1 -u 2>/dev/null")
 	if vim.v.shell_error ~= 0 then
 		return nil, "Failed to get git status"
 	end
