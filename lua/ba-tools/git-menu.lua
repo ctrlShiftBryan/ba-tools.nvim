@@ -359,9 +359,9 @@ local function open_diff()
 		return
 	end
 
-	-- Open diffview for this file
-	-- DiffviewOpen with a path shows the diff for that specific file
-	vim.cmd("DiffviewOpen -- " .. vim.fn.fnameescape(filepath))
+	-- Open diffview file history for this file
+	-- DiffviewFileHistory shows changes for a specific file only
+	vim.cmd("DiffviewFileHistory " .. vim.fn.fnameescape(filepath))
 end
 
 -- Discard changes to the selected file
