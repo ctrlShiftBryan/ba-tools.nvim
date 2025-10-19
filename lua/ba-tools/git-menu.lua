@@ -100,9 +100,9 @@ local function update_cursor(new_line)
 
 	state.current_line = new_line
 
-	-- Remember last selected file for next time
+	-- Remember last selected file for next time (but not categories)
 	local file_info = state.line_to_file[new_line]
-	if file_info then
+	if file_info and not file_info.is_category then
 		last_selected_file = file_info.entry.file
 	end
 end
@@ -160,6 +160,8 @@ local function refresh_menu()
 
 	-- Staged section
 	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
+	table.insert(selectable_lines, line_num)
+	line_to_file[line_num] = { is_category = true, section = "staged", files = status.staged }
 	line_num = line_num + 1
 
 	if #status.staged > 0 then
@@ -184,6 +186,8 @@ local function refresh_menu()
 
 	-- Unstaged section
 	table.insert(lines, string.format("Changes (%d)", #status.unstaged))
+	table.insert(selectable_lines, line_num)
+	line_to_file[line_num] = { is_category = true, section = "unstaged", files = status.unstaged }
 	line_num = line_num + 1
 
 	if #status.unstaged > 0 then
@@ -238,6 +242,12 @@ local function open_file()
 		return
 	end
 
+	-- Cannot open a category
+	if file_info.is_category then
+		vim.notify("Cannot open category. Use 's' to stage/unstage all files.", vim.log.levels.WARN)
+		return
+	end
+
 	local filepath = file_info.entry.file
 	close_menu()
 
@@ -245,13 +255,48 @@ local function open_file()
 	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 end
 
--- Stage or unstage the selected file
+-- Stage or unstage the selected file or category
 local function toggle_stage()
 	local file_info = get_current_file()
 	if not file_info then
 		return
 	end
 
+	-- Check if this is a category header
+	if file_info.is_category then
+		local section = file_info.section
+		local files = file_info.files
+
+		-- Stage/unstage all files in this category
+		local failed = {}
+		local action = section == "staged" and "Unstaging" or "Staging"
+
+		for _, entry in ipairs(files) do
+			local success, err
+			if section == "staged" then
+				success, err = git.unstage_file(entry.file)
+			else
+				success, err = git.stage_file(entry.file)
+			end
+
+			if not success then
+				table.insert(failed, entry.file)
+			end
+		end
+
+		-- Show notification
+		if #failed == 0 then
+			local past_tense = section == "staged" and "unstaged" or "staged"
+			vim.notify(string.format("%s %d files", past_tense, #files), vim.log.levels.INFO)
+		else
+			vim.notify(string.format("Failed to process %d files", #failed), vim.log.levels.ERROR)
+		end
+
+		refresh_menu()
+		return
+	end
+
+	-- Single file stage/unstage
 	local filepath = file_info.entry.file
 	local section = file_info.section
 
@@ -285,6 +330,12 @@ end
 local function discard_changes()
 	local file_info = get_current_file()
 	if not file_info then
+		return
+	end
+
+	-- Cannot discard a category
+	if file_info.is_category then
+		vim.notify("Cannot discard category. Select individual files.", vim.log.levels.WARN)
 		return
 	end
 
@@ -373,6 +424,8 @@ M.show = function()
 
 	-- Staged section
 	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
+	table.insert(selectable_lines, line_num)
+	line_to_file[line_num] = { is_category = true, section = "staged", files = status.staged }
 	line_num = line_num + 1
 
 	if #status.staged > 0 then
@@ -391,6 +444,8 @@ M.show = function()
 
 	-- Unstaged section
 	table.insert(lines, string.format("Changes (%d)", #status.unstaged))
+	table.insert(selectable_lines, line_num)
+	line_to_file[line_num] = { is_category = true, section = "unstaged", files = status.unstaged }
 	line_num = line_num + 1
 
 	if #status.unstaged > 0 then
