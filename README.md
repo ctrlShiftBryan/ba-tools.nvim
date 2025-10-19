@@ -46,11 +46,11 @@ Opens a centered floating window showing git status with staged and unstaged cha
 **Keymaps:**
 - `↓`/`↑` - Navigate up/down through files (includes category headers)
 - **Quick access shortcuts** - Each file has two-character keybinds displayed in the first column
-  - **Lowercase** (e.g., `hh`, `jj`, `kk`, `hl`) - Opens file in diff mode
-  - **Uppercase** (e.g., `HH`, `JJ`, `KK`, `HL`) - Opens file directly (no diff, clean window)
-  - Uses ergonomic home row pattern: `hjkl` (semicolon excluded from uppercase)
-  - Supports up to 25 files for lowercase, 16 for uppercase
-  - Order: Same-key easiest (`hh`/`HH`, `jj`/`JJ`, `kk`/`KK`, `ll`/`LL`), then adjacent rolls, then others
+  - **Lowercase** (e.g., `hh`, `jj`, `kk`, `;;`, `h;`) - Opens file in diff mode
+  - **Uppercase** (e.g., `HH`, `JJ`, `KK`, `::`, `H:`) - Opens file directly (no diff, clean window)
+  - Uses ergonomic home row pattern: `hjkl;` (colon `:` is uppercase of semicolon `;`)
+  - Supports up to 25 files for both lowercase and uppercase
+  - Order: Same-key easiest (`hh`/`HH`, `jj`/`JJ`, `kk`/`KK`, `ll`/`LL`, `;;`/`::`), then adjacent rolls, then others
 - `<Enter>` - Open currently selected file
   - Modified files: Opens in diff mode (HEAD vs working copy)
   - Untracked files: Opens normally (no diff available)

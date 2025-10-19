@@ -23,21 +23,21 @@ local keybind_sequence_diff = {
 	"hl", "lh", "h;", ";h", "j;", ";j"
 }
 
--- Uppercase (16 total): Opens file directly (no diff)
--- Note: Semicolon has no uppercase, so those combinations are excluded
+-- Uppercase (25 total): Opens file directly (no diff)
+-- Note: Colon (:) is the uppercase version of semicolon (;)
 local keybind_sequence_direct = {
 	-- Same key (easiest)
-	"HH", "JJ", "KK", "LL",
+	"HH", "JJ", "KK", "LL", "::",
 	-- Adjacent outward roll
-	"HJ", "JK", "KL",
+	"HJ", "JK", "KL", "L:",
 	-- Adjacent inward roll
-	"JH", "KJ", "LK",
+	"JH", "KJ", "LK", ":L",
 	-- Skip one outward
-	"HK", "JL",
+	"HK", "JL", "K:",
 	-- Skip one inward
-	"KH", "LJ",
+	"KH", "LJ", ":K",
 	-- Remaining combinations
-	"HL", "LH"
+	"HL", "LH", "H:", ":H", "J:", ":J"
 }
 
 -- Persistent state across menu invocations
