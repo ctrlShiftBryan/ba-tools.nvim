@@ -488,6 +488,15 @@ end
 local function setup_keymaps(buf)
 	local opts = { buffer = buf, nowait = true, silent = true }
 
+	-- Navigation with arrow keys
+	vim.keymap.set("n", "<Down>", function()
+		move_cursor(1)
+	end, opts)
+
+	vim.keymap.set("n", "<Up>", function()
+		move_cursor(-1)
+	end, opts)
+
 	-- Dynamic keybinds for quick file access (hh, jj, kk, etc.)
 	for keybind, line_num in pairs(state.keybind_to_line) do
 		vim.keymap.set("n", keybind, function()

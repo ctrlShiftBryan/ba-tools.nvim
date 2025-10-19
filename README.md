@@ -44,6 +44,7 @@ Opens a centered floating window showing git status with staged and unstaged cha
 - Close with `ESC` or `q`
 
 **Keymaps:**
+- `↓`/`↑` - Navigate up/down through files (includes category headers)
 - **Quick access shortcuts** - Each file has a two-character keybind (e.g., `hh`, `jj`, `kk`, `hl`) displayed in the first column
   - Press the keybind to instantly open that file in diff mode
   - Uses ergonomic home row pattern: `hjkl;`
@@ -63,8 +64,6 @@ Opens a centered floating window showing git status with staged and unstaged cha
   - Cannot discard staged changes (unstage first with `s`)
   - Not available on category headers
 - `q`/`<Esc>` - Close menu
-
-**Note:** Navigation with `j`/`k` has been removed in favor of quick access keybinds for a faster workflow.
 
 **Usage:** Press `<leader>tg` to open the git menu.
 
