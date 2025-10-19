@@ -44,7 +44,7 @@ Opens a centered floating window showing git status with staged and unstaged cha
 - Close with `ESC` or `q`
 
 **Keymaps:**
-- `j`/`k` - Navigate up/down (includes category headers)
+- `j`/`k` or `↓`/`↑` - Navigate up/down (includes category headers)
 - `<Enter>` - Open selected file in editor
 - `s` - Stage/unstage
   - On a file: Stage (if unstaged) or unstage (if staged)

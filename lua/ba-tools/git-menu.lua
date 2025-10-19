@@ -382,6 +382,15 @@ local function setup_keymaps(buf)
 		move_cursor(-1)
 	end, opts)
 
+	-- Arrow keys (same as j/k)
+	vim.keymap.set("n", "<Down>", function()
+		move_cursor(1)
+	end, opts)
+
+	vim.keymap.set("n", "<Up>", function()
+		move_cursor(-1)
+	end, opts)
+
 	-- Actions
 	vim.keymap.set("n", "<CR>", open_file, opts)
 	vim.keymap.set("n", "s", toggle_stage, opts)
