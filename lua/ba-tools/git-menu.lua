@@ -337,66 +337,8 @@ local function toggle_stage()
 	end
 end
 
--- Open diff view with DiffviewOpen HEAD (Option 1)
-local function open_diff_diffview()
-	local file_info = get_current_file()
-	if not file_info then
-		return
-	end
-
-	-- Cannot diff a category
-	if file_info.is_category then
-		vim.notify("Cannot open diff for category. Select individual files.", vim.log.levels.WARN)
-		return
-	end
-
-	local filepath = file_info.entry.file
-	local is_untracked = file_info.entry.status == "U"
-
-	-- Cannot diff untracked files (no previous version to compare against)
-	if is_untracked then
-		vim.notify("Cannot diff untracked file. No previous version exists.", vim.log.levels.WARN)
-		return
-	end
-
-	-- Open diffview for HEAD vs working directory for this file
-	vim.cmd("DiffviewOpen HEAD -- " .. vim.fn.fnameescape(filepath))
-end
-
--- Open diff with gitsigns (Option 2)
-local function open_diff_gitsigns()
-	local file_info = get_current_file()
-	if not file_info then
-		return
-	end
-
-	-- Cannot diff a category
-	if file_info.is_category then
-		vim.notify("Cannot open diff for category. Select individual files.", vim.log.levels.WARN)
-		return
-	end
-
-	local filepath = file_info.entry.file
-	local is_untracked = file_info.entry.status == "U"
-
-	-- Cannot diff untracked files (no previous version to compare against)
-	if is_untracked then
-		vim.notify("Cannot diff untracked file. No previous version exists.", vim.log.levels.WARN)
-		return
-	end
-
-	-- Close menu and open the file
-	close_menu()
-
-	-- Open the file
-	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
-
-	-- Use gitsigns to show diff against HEAD
-	require('gitsigns').diffthis('HEAD')
-end
-
--- Open diff with native vim diff (Option 3)
-local function open_diff_native()
+-- Open diff with native vim diff
+local function open_diff()
 	local file_info = get_current_file()
 	if not file_info then
 		return
@@ -521,12 +463,10 @@ local function setup_keymaps(buf)
 	end, opts)
 
 	-- Actions
-	vim.keymap.set("n", "<CR>", open_file, opts)
+	vim.keymap.set("n", "<CR>", open_diff, opts)
+	vim.keymap.set("n", "o", open_file, opts)
 	vim.keymap.set("n", "s", toggle_stage, opts)
 	vim.keymap.set("n", "d", discard_changes, opts)
-	vim.keymap.set("n", "p", open_diff_diffview, opts)
-	vim.keymap.set("n", "o", open_diff_gitsigns, opts)
-	vim.keymap.set("n", "i", open_diff_native, opts)
 
 	-- Close
 	vim.keymap.set("n", "q", close_menu, opts)

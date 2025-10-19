@@ -45,7 +45,11 @@ Opens a centered floating window showing git status with staged and unstaged cha
 
 **Keymaps:**
 - `j`/`k` or `↓`/`↑` - Navigate up/down (includes category headers)
-- `<Enter>` - Open selected file in editor
+- `<Enter>` - Open diff (native vim diff mode)
+  - Shows HEAD version vs working copy in vertical split
+  - Only works for modified files (not untracked files)
+  - Closes git menu automatically
+- `o` - Open file in editor (without diff)
 - `s` - Stage/unstage
   - On a file: Stage (if unstaged) or unstage (if staged)
   - On a category header: Stage/unstage ALL files in that category
@@ -54,17 +58,6 @@ Opens a centered floating window showing git status with staged and unstaged cha
   - For tracked files: restores from HEAD
   - Cannot discard staged changes (unstage first with `s`)
   - Not available on category headers
-- `p` - Preview diff (DiffviewOpen HEAD)
-  - Opens diffview with 2-pane diff for the selected file
-  - Only works for modified files (not untracked files)
-- `o` - Preview diff (gitsigns)
-  - Opens file with gitsigns diff view (side-by-side)
-  - Lightweight alternative to diffview
-  - Closes git menu automatically
-- `i` - Preview diff (native vim)
-  - Uses built-in vim diff mode
-  - Shows HEAD version vs working copy in vertical split
-  - Closes git menu automatically
 - `q`/`<Esc>` - Close menu
 
 **Bulk Operations:**
