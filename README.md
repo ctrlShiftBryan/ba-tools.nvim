@@ -44,14 +44,20 @@ Opens a centered floating window showing git status with staged and unstaged cha
 - Close with `ESC` or `q`
 
 **Keymaps:**
-- `j`/`k` - Navigate up/down
+- `j`/`k` - Navigate up/down (includes category headers)
 - `<Enter>` - Open selected file in editor
-- `s` - Stage file (if unstaged) or unstage file (if staged)
+- `s` - Stage/unstage
+  - On a file: Stage (if unstaged) or unstage (if staged)
+  - On a category header: Stage/unstage ALL files in that category
 - `d` - Discard changes to file (with confirmation prompt)
   - For untracked files: deletes the file
   - For tracked files: restores from HEAD
   - Cannot discard staged changes (unstage first with `s`)
+  - Not available on category headers
 - `q`/`<Esc>` - Close menu
+
+**Bulk Operations:**
+Category headers ("Staged Changes" and "Changes") are now selectable. Navigate to a category with `j`/`k` and press `s` to stage/unstage all files in that section at once.
 
 **Usage:** Press `<leader>tg` to open the git menu.
 
