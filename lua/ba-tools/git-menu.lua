@@ -417,8 +417,8 @@ end
 
 -- Render the git status menu
 M.show = function()
-	-- Set up highlight group (link to CursorLine for consistent theme integration)
-	vim.api.nvim_set_hl(0, "BaGitMenuSelected", { link = "CursorLine", default = true })
+	-- Set up highlight group (link to Visual for visible selection)
+	vim.api.nvim_set_hl(0, "BaGitMenuSelected", { link = "Visual", default = true })
 
 	-- Get git status
 	local status, err = git.get_status()
