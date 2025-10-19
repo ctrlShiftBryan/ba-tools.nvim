@@ -46,6 +46,7 @@ end
 
 -- Format a file entry for display in three columns:
 -- "  filename.ts      path/to/dir/    A"
+-- Priority: Always show full filename, path gets remaining space
 M.format_file_line = function(filepath, status, width, is_selected)
 	local filename = vim.fn.fnamemodify(filepath, ":t")
 	local dir = vim.fn.fnamemodify(filepath, ":h")
@@ -59,37 +60,33 @@ M.format_file_line = function(filepath, status, width, is_selected)
 	end
 
 	local prefix = is_selected and "> " or "  "
+	local spacing = "  " -- Space between filename and path
+	local status_col = "  " .. status
 
-	-- Column widths (approximate percentages of available width)
-	-- prefix (2) + filename (35%) + space (2) + path (50%) + space (2) + status (3)
-	local available = width - #prefix - 7 -- 7 = spaces and status column
-	local filename_width = math.floor(available * 0.35)
-	local path_width = available - filename_width
+	-- Calculate available space for path
+	-- total_width = prefix + filename + spacing + path + status_col
+	local used = #prefix + #filename + #spacing + #status_col
+	local path_space = width - used
 
-	-- Truncate filename if needed
-	local display_filename = filename
-	if #filename > filename_width then
-		display_filename = filename:sub(1, filename_width - 3) .. "..."
-	end
-
-	-- Truncate path if needed
+	-- Truncate path if it doesn't fit
 	local display_path = dir
-	if #dir > path_width then
-		-- Show end of path (most relevant part)
-		display_path = "..." .. dir:sub(-(path_width - 3))
+	if #dir > path_space then
+		if path_space > 3 then
+			-- Show end of path (most relevant part)
+			display_path = "..." .. dir:sub(-(path_space - 3))
+		else
+			-- Not enough space for path at all
+			display_path = ""
+		end
 	end
 
-	-- Build the line with proper spacing
-	-- Column 1: filename (left-aligned, fixed width)
-	local col1 = display_filename .. string.rep(" ", filename_width - #display_filename)
+	-- Pad path to fill remaining space
+	local path_padding = path_space - #display_path
+	if path_padding < 0 then
+		path_padding = 0
+	end
 
-	-- Column 2: path (left-aligned in its space)
-	local col2 = display_path .. string.rep(" ", path_width - #display_path)
-
-	-- Column 3: status (right-aligned, 3 chars wide)
-	local col3 = "  " .. status
-
-	return prefix .. col1 .. "  " .. col2 .. col3
+	return prefix .. filename .. spacing .. display_path .. string.rep(" ", path_padding) .. status_col
 end
 
 return M
