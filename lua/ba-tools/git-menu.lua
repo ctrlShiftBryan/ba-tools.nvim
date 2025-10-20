@@ -536,9 +536,9 @@ local function toggle_path()
 		return
 	end
 
-	-- Cannot use on category
+	-- If on category, just behave like 's' (stage/unstage all)
 	if file_info.is_category then
-		vim.notify("Cannot toggle path from category. Select a file.", vim.log.levels.WARN)
+		toggle_stage()
 		return
 	end
 
@@ -672,6 +672,19 @@ M.show = function()
 	state.buf = window.buf
 	state.win = window.win
 	state.width = window.width
+
+	-- Auto-close window when navigating away (Option A: temporary overlay behavior)
+	-- This autocmd will be automatically cleaned up when the buffer is wiped
+	vim.api.nvim_create_autocmd("WinLeave", {
+		buffer = state.buf,
+		callback = function()
+			-- Close the window when leaving it
+			if state.win and vim.api.nvim_win_is_valid(state.win) then
+				vim.api.nvim_win_close(state.win, true)
+			end
+		end,
+		once = true, -- Only trigger once (then buffer gets wiped anyway)
+	})
 
 	-- First pass: Calculate max filename width for consistent columns
 	local max_filename_width = 0
