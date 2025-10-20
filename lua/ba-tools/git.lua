@@ -95,6 +95,50 @@ M.unstage_file = function(filepath)
 	return true
 end
 
+-- Stage multiple files at once (batch operation)
+M.stage_files = function(filepaths)
+	if #filepaths == 0 then
+		return true
+	end
+
+	-- Build array of shell-escaped paths
+	local escaped = {}
+	for _, path in ipairs(filepaths) do
+		table.insert(escaped, vim.fn.shellescape(path))
+	end
+
+	-- Single git command for all files
+	local cmd = "git add " .. table.concat(escaped, " ") .. " 2>&1"
+	local output = vim.fn.system(cmd)
+
+	if vim.v.shell_error ~= 0 then
+		return false, "Failed to stage files: " .. output
+	end
+	return true
+end
+
+-- Unstage multiple files at once (batch operation)
+M.unstage_files = function(filepaths)
+	if #filepaths == 0 then
+		return true
+	end
+
+	-- Build array of shell-escaped paths
+	local escaped = {}
+	for _, path in ipairs(filepaths) do
+		table.insert(escaped, vim.fn.shellescape(path))
+	end
+
+	-- Single git command for all files
+	local cmd = "git restore --staged " .. table.concat(escaped, " ") .. " 2>&1"
+	local output = vim.fn.system(cmd)
+
+	if vim.v.shell_error ~= 0 then
+		return false, "Failed to unstage files: " .. output
+	end
+	return true
+end
+
 -- Discard changes to a file
 M.discard_file = function(filepath, is_untracked)
 	local cmd

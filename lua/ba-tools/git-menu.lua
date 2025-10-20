@@ -361,29 +361,25 @@ local function toggle_stage()
 		local section = file_info.section
 		local files = file_info.files
 
-		-- Stage/unstage all files in this category
-		local failed = {}
-		local action = section == "staged" and "Unstaging" or "Staging"
-
+		-- Stage/unstage all files in this category with a single git command (batch operation)
+		local filepaths = {}
 		for _, entry in ipairs(files) do
-			local success, err
-			if section == "staged" then
-				success, err = git.unstage_file(entry.file)
-			else
-				success, err = git.stage_file(entry.file)
-			end
+			table.insert(filepaths, entry.file)
+		end
 
-			if not success then
-				table.insert(failed, entry.file)
-			end
+		local success, err
+		if section == "staged" then
+			success, err = git.unstage_files(filepaths)
+		else
+			success, err = git.stage_files(filepaths)
 		end
 
 		-- Show notification
-		if #failed == 0 then
-			local past_tense = section == "staged" and "unstaged" or "staged"
+		if success then
+			local past_tense = section == "staged" and "Unstaged" or "Staged"
 			vim.notify(string.format("%s %d files", past_tense, #files), vim.log.levels.INFO)
 		else
-			vim.notify(string.format("Failed to process %d files", #failed), vim.log.levels.ERROR)
+			vim.notify(string.format("Failed to process files: %s", err or "unknown error"), vim.log.levels.ERROR)
 		end
 
 		refresh_menu()
@@ -589,26 +585,19 @@ local function toggle_path()
 		return
 	end
 
-	-- Process all files
-	local failed = {}
-	for _, file in ipairs(files_to_process) do
-		local success, process_err
-		if section == "unstaged" then
-			success, process_err = git.stage_file(file)
-		else
-			success, process_err = git.unstage_file(file)
-		end
-
-		if not success then
-			table.insert(failed, file)
-		end
+	-- Process all files with a single git command (batch operation)
+	local success, process_err
+	if section == "unstaged" then
+		success, process_err = git.stage_files(files_to_process)
+	else
+		success, process_err = git.unstage_files(files_to_process)
 	end
 
 	-- Show notification
-	if #failed == 0 then
+	if success then
 		vim.notify(string.format("%s %d files at %s", action_past, #files_to_process, dir), vim.log.levels.INFO)
 	else
-		vim.notify(string.format("Failed to %s %d files", action, #failed), vim.log.levels.ERROR)
+		vim.notify(string.format("Failed to %s files: %s", action, process_err or "unknown error"), vim.log.levels.ERROR)
 	end
 
 	-- Refresh the menu
