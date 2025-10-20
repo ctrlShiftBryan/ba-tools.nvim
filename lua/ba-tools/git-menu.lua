@@ -459,6 +459,7 @@ local function open_diff()
 
 	local filepath = file_info.entry.file
 	local is_untracked = file_info.entry.status == "U"
+	local section = file_info.section
 
 	-- For untracked files, just open them normally (no diff to show)
 	if is_untracked then
@@ -468,6 +469,28 @@ local function open_diff()
 		vim.cmd("only")
 		vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 		return
+	end
+
+	-- Determine which version to diff against
+	-- For unstaged files: check if file is also staged (to show index vs working)
+	-- For staged files: always show HEAD vs index
+	local diff_against_index = false
+	local diff_label = "HEAD"
+
+	if section == "unstaged" then
+		-- Check if this file also exists in the staged section
+		-- Get current git status
+		local status, err = git.get_status()
+		if status then
+			for _, entry in ipairs(status.staged) do
+				if entry.file == filepath then
+					-- File is both staged and unstaged - show index vs working
+					diff_against_index = true
+					diff_label = "Staged"
+					break
+				end
+			end
+		end
 	end
 
 	-- Close menu
@@ -482,31 +505,38 @@ local function open_diff()
 	-- Open the file
 	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 
-	-- Get HEAD version of the file
-	local head_content = vim.fn.system("git show HEAD:" .. vim.fn.shellescape(filepath))
+	-- Get the comparison version
+	local comparison_content
+	if diff_against_index then
+		-- Get staged (index) version: git show :0:<file>
+		comparison_content = vim.fn.system("git show :0:" .. vim.fn.shellescape(filepath))
+	else
+		-- Get HEAD version
+		comparison_content = vim.fn.system("git show HEAD:" .. vim.fn.shellescape(filepath))
+	end
 
 	if vim.v.shell_error ~= 0 then
-		vim.notify("Failed to get HEAD version of file", vim.log.levels.ERROR)
+		vim.notify("Failed to get " .. diff_label .. " version of file", vim.log.levels.ERROR)
 		return
 	end
 
-	-- Create a temporary buffer for HEAD version
+	-- Create a temporary buffer for comparison version
 	vim.cmd("vertical new")
-	local head_buf = vim.api.nvim_get_current_buf()
-	vim.api.nvim_buf_set_name(head_buf, filepath .. " (HEAD)")
+	local comparison_buf = vim.api.nvim_get_current_buf()
+	vim.api.nvim_buf_set_name(comparison_buf, filepath .. " (" .. diff_label .. ")")
 
 	-- Set buffer options
-	vim.api.nvim_buf_set_option(head_buf, "buftype", "nofile")
-	vim.api.nvim_buf_set_option(head_buf, "bufhidden", "wipe")
-	vim.api.nvim_buf_set_option(head_buf, "swapfile", false)
+	vim.api.nvim_buf_set_option(comparison_buf, "buftype", "nofile")
+	vim.api.nvim_buf_set_option(comparison_buf, "bufhidden", "wipe")
+	vim.api.nvim_buf_set_option(comparison_buf, "swapfile", false)
 
 	-- Set the content
-	local lines = vim.split(head_content, "\n")
-	vim.api.nvim_buf_set_lines(head_buf, 0, -1, false, lines)
+	local lines = vim.split(comparison_content, "\n")
+	vim.api.nvim_buf_set_lines(comparison_buf, 0, -1, false, lines)
 
 	-- Set filetype to match the original file
 	local ft = vim.bo.filetype
-	vim.api.nvim_buf_set_option(head_buf, "filetype", ft)
+	vim.api.nvim_buf_set_option(comparison_buf, "filetype", ft)
 
 	-- Enable diff mode on both buffers
 	vim.cmd("diffthis")
@@ -554,6 +584,62 @@ local function discard_changes()
 		refresh_menu()
 	else
 		vim.notify(err, vim.log.levels.ERROR)
+	end
+end
+
+-- Revert unstaged changes (restore from staged or HEAD)
+local function revert_unstaged()
+	local file_info = get_current_file()
+	if not file_info then
+		return
+	end
+
+	-- Cannot revert a category
+	if file_info.is_category then
+		vim.notify("Cannot revert category. Select individual files.", vim.log.levels.WARN)
+		return
+	end
+
+	local filepath = file_info.entry.file
+	local section = file_info.section
+
+	-- Can only revert unstaged changes
+	if section == "staged" then
+		vim.notify("Cannot revert staged changes. Use this on unstaged files only.", vim.log.levels.WARN)
+		return
+	end
+
+	-- Check if file is also staged to determine restore source
+	local is_also_staged = false
+	local status, err = git.get_status()
+	if status then
+		for _, entry in ipairs(status.staged) do
+			if entry.file == filepath then
+				is_also_staged = true
+				break
+			end
+		end
+	end
+
+	-- Confirm before reverting
+	local restore_source = is_also_staged and "staged version" or "HEAD"
+	local choice = vim.fn.confirm(
+		string.format("Revert '%s' to %s?", filepath, restore_source),
+		"&Yes\n&No",
+		2
+	)
+
+	if choice ~= 1 then
+		return
+	end
+
+	-- Revert the changes using git restore
+	local success, restore_err = git.restore_file(filepath)
+	if success then
+		vim.notify(string.format("Reverted to %s: %s", restore_source, filepath), vim.log.levels.INFO)
+		refresh_menu()
+	else
+		vim.notify(restore_err, vim.log.levels.ERROR)
 	end
 end
 
@@ -667,6 +753,7 @@ local function setup_keymaps(buf)
 	vim.keymap.set("n", "o", open_file, opts)
 	vim.keymap.set("n", "s", toggle_stage, opts)
 	vim.keymap.set("n", "d", discard_changes, opts)
+	vim.keymap.set("n", "r", revert_unstaged, opts)
 	vim.keymap.set("n", "p", toggle_path, opts)
 
 	-- Close

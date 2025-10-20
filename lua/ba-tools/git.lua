@@ -157,4 +157,17 @@ M.discard_file = function(filepath, is_untracked)
 	return true
 end
 
+-- Restore unstaged changes to a file (from staged version or HEAD)
+-- Uses git restore which automatically:
+-- - If file is staged: restores from index (staged version)
+-- - If file is not staged: restores from HEAD
+M.restore_file = function(filepath)
+	local cmd = string.format("git restore %s 2>&1", vim.fn.shellescape(filepath))
+	local output = vim.fn.system(cmd)
+	if vim.v.shell_error ~= 0 then
+		return false, "Failed to restore file: " .. output
+	end
+	return true
+end
+
 return M
