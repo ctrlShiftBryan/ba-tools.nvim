@@ -3,8 +3,9 @@ local git = require("ba-tools.git")
 
 local M = {}
 
--- Create highlight namespace for selection
-local ns_id = vim.api.nvim_create_namespace("ba-git-menu-selection")
+-- Create highlight namespaces
+local ns_id_selection = vim.api.nvim_create_namespace("ba-git-menu-selection")
+local ns_id_syntax = vim.api.nvim_create_namespace("ba-git-menu-syntax")
 
 -- Ergonomic two-character keybind pattern using hjkl; home row
 -- Lowercase (25 total): Opens diff view
@@ -113,12 +114,12 @@ local function update_cursor(new_line)
 		return
 	end
 
-	-- Clear all existing highlights
-	vim.api.nvim_buf_clear_namespace(state.buf, ns_id, 0, -1)
+	-- Clear only selection highlights (not syntax highlights)
+	vim.api.nvim_buf_clear_namespace(state.buf, ns_id_selection, 0, -1)
 
 	-- Add highlight to new line (0-indexed for line number)
 	if new_line >= 1 and new_line <= #state.lines then
-		vim.api.nvim_buf_add_highlight(state.buf, ns_id, "BaGitMenuSelected", new_line - 1, 0, -1)
+		vim.api.nvim_buf_add_highlight(state.buf, ns_id_selection, "BaGitMenuSelected", new_line - 1, 0, -1)
 	end
 
 	-- Move vim cursor to the new line
@@ -181,19 +182,32 @@ local function refresh_menu()
 	local target_index = current_file_info and current_file_info.index
 	local target_is_category = current_file_info and current_file_info.is_category
 
-	-- First pass: Calculate max filename width for consistent columns
+	-- First pass: Calculate max filename width for consistent columns (including icons)
 	local max_filename_width = 0
+	local has_devicons, devicons = pcall(require, "nvim-web-devicons")
+
 	for _, entry in ipairs(status.staged) do
 		local filename = vim.fn.fnamemodify(entry.file, ":t")
-		max_filename_width = math.max(max_filename_width, #filename)
+		local width = #filename
+		-- Add icon width if devicons available (icon + space = ~3 chars)
+		if has_devicons then
+			width = width + 3
+		end
+		max_filename_width = math.max(max_filename_width, width)
 	end
 	for _, entry in ipairs(status.unstaged) do
 		local filename = vim.fn.fnamemodify(entry.file, ":t")
-		max_filename_width = math.max(max_filename_width, #filename)
+		local width = #filename
+		-- Add icon width if devicons available
+		if has_devicons then
+			width = width + 3
+		end
+		max_filename_width = math.max(max_filename_width, width)
 	end
 
 	-- Build lines
 	local lines = {}
+	local line_highlights = {} -- Store highlights for each line
 	local line_num = 1
 	local selectable_lines = {}
 	local line_to_file = {}
@@ -203,6 +217,7 @@ local function refresh_menu()
 
 	-- Staged section
 	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
+	line_highlights[line_num] = { { group = "BaGitMenuHeader", start_col = 0, end_col = -1 } }
 	table.insert(selectable_lines, line_num)
 	line_to_file[line_num] = { is_category = true, section = "staged", files = status.staged }
 	line_num = line_num + 1
@@ -227,8 +242,9 @@ local function refresh_menu()
 			local keybind = keybind_diff
 			keybind_idx = keybind_idx + 1
 
-			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
-			table.insert(lines, line)
+			local formatted = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
+			table.insert(lines, formatted.line)
+			line_highlights[line_num] = formatted.highlights
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "staged", index = i, entry = entry }
 			line_num = line_num + 1
@@ -241,6 +257,7 @@ local function refresh_menu()
 
 	-- Unstaged section
 	table.insert(lines, string.format("Changes (%d)", #status.unstaged))
+	line_highlights[line_num] = { { group = "BaGitMenuHeader", start_col = 0, end_col = -1 } }
 	table.insert(selectable_lines, line_num)
 	line_to_file[line_num] = { is_category = true, section = "unstaged", files = status.unstaged }
 	line_num = line_num + 1
@@ -265,8 +282,9 @@ local function refresh_menu()
 			local keybind = keybind_diff
 			keybind_idx = keybind_idx + 1
 
-			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
-			table.insert(lines, line)
+			local formatted = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
+			table.insert(lines, formatted.line)
+			line_highlights[line_num] = formatted.highlights
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "unstaged", index = i, entry = entry }
 			line_num = line_num + 1
@@ -313,10 +331,20 @@ local function refresh_menu()
 	vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
 	vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
 
-	-- Apply highlight to current line
-	vim.api.nvim_buf_clear_namespace(state.buf, ns_id, 0, -1)
+	-- Clear both namespaces before re-applying highlights
+	vim.api.nvim_buf_clear_namespace(state.buf, ns_id_syntax, 0, -1)
+	vim.api.nvim_buf_clear_namespace(state.buf, ns_id_selection, 0, -1)
+
+	-- Apply syntax highlights to all lines
+	for line_idx, highlights in pairs(line_highlights) do
+		for _, hl in ipairs(highlights) do
+			vim.api.nvim_buf_add_highlight(state.buf, ns_id_syntax, hl.group, line_idx - 1, hl.start_col, hl.end_col)
+		end
+	end
+
+	-- Apply selection highlight
 	if state.current_line then
-		vim.api.nvim_buf_add_highlight(state.buf, ns_id, "BaGitMenuSelected", state.current_line - 1, 0, -1)
+		vim.api.nvim_buf_add_highlight(state.buf, ns_id_selection, "BaGitMenuSelected", state.current_line - 1, 0, -1)
 	end
 
 	-- Move vim cursor to the current line
@@ -651,8 +679,24 @@ end
 
 -- Render the git status menu
 M.show = function()
-	-- Set up highlight group (link to Visual for visible selection)
+	-- Set up highlight groups
+	-- Selection uses Visual (keeps background)
 	vim.api.nvim_set_hl(0, "BaGitMenuSelected", { link = "Visual", default = true })
+
+	-- Extract foreground colors only (no background) so selection shows through
+	local function get_fg_hl(name)
+		local hl = vim.api.nvim_get_hl(0, { name = name })
+		return { fg = hl.fg, bg = "NONE" }
+	end
+
+	vim.api.nvim_set_hl(0, "BaGitMenuAdded", get_fg_hl("DiffAdd"))
+	vim.api.nvim_set_hl(0, "BaGitMenuModified", get_fg_hl("DiffChange"))
+	vim.api.nvim_set_hl(0, "BaGitMenuDeleted", get_fg_hl("DiffDelete"))
+	vim.api.nvim_set_hl(0, "BaGitMenuUntracked", get_fg_hl("Directory"))
+	vim.api.nvim_set_hl(0, "BaGitMenuPath", get_fg_hl("Comment"))
+	vim.api.nvim_set_hl(0, "BaGitMenuHeader", get_fg_hl("Title"))
+	vim.api.nvim_set_hl(0, "BaGitMenuKeybind", get_fg_hl("Comment"))
+	vim.api.nvim_set_hl(0, "BaGitMenuFilename", { fg = "NONE", bg = "NONE" })
 
 	-- Get git status
 	local status, err = git.get_status()
@@ -673,11 +717,37 @@ M.show = function()
 	state.win = window.win
 	state.width = window.width
 
+	-- Hide cursor in this window by making it transparent
+	-- Try to get background color from Normal or NormalFloat
+	local normal_hl = vim.api.nvim_get_hl(0, { name = "NormalFloat" })
+	local bg_color = normal_hl.bg
+
+	if not bg_color then
+		normal_hl = vim.api.nvim_get_hl(0, { name = "Normal" })
+		bg_color = normal_hl.bg
+	end
+
+	-- Convert number to hex string if needed
+	if bg_color and type(bg_color) == "number" then
+		bg_color = string.format("#%06x", bg_color)
+	elseif not bg_color then
+		-- Fallback to black if no background found
+		bg_color = "#000000"
+	end
+
+	vim.api.nvim_set_hl(0, "BaGitMenuCursor", { fg = bg_color, bg = bg_color, blend = 100 })
+
+	local saved_guicursor = vim.opt.guicursor:get()
+	vim.opt.guicursor = "a:block-BaGitMenuCursor"
+
 	-- Auto-close window when navigating away (Option A: temporary overlay behavior)
 	-- This autocmd will be automatically cleaned up when the buffer is wiped
 	vim.api.nvim_create_autocmd("WinLeave", {
 		buffer = state.buf,
 		callback = function()
+			-- Restore cursor
+			vim.opt.guicursor = saved_guicursor
+
 			-- Close the window when leaving it
 			if state.win and vim.api.nvim_win_is_valid(state.win) then
 				vim.api.nvim_win_close(state.win, true)
@@ -686,19 +756,32 @@ M.show = function()
 		once = true, -- Only trigger once (then buffer gets wiped anyway)
 	})
 
-	-- First pass: Calculate max filename width for consistent columns
+	-- First pass: Calculate max filename width for consistent columns (including icons)
 	local max_filename_width = 0
+	local has_devicons, devicons = pcall(require, "nvim-web-devicons")
+
 	for _, entry in ipairs(status.staged) do
 		local filename = vim.fn.fnamemodify(entry.file, ":t")
-		max_filename_width = math.max(max_filename_width, #filename)
+		local width = #filename
+		-- Add icon width if devicons available (icon + space = ~3 chars)
+		if has_devicons then
+			width = width + 3
+		end
+		max_filename_width = math.max(max_filename_width, width)
 	end
 	for _, entry in ipairs(status.unstaged) do
 		local filename = vim.fn.fnamemodify(entry.file, ":t")
-		max_filename_width = math.max(max_filename_width, #filename)
+		local width = #filename
+		-- Add icon width if devicons available
+		if has_devicons then
+			width = width + 3
+		end
+		max_filename_width = math.max(max_filename_width, width)
 	end
 
 	-- Build lines
 	local lines = {}
+	local line_highlights = {} -- Store highlights for each line
 	local line_num = 1
 	local selectable_lines = {}
 	local line_to_file = {}
@@ -708,6 +791,7 @@ M.show = function()
 
 	-- Staged section
 	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
+	line_highlights[line_num] = { { group = "BaGitMenuHeader", start_col = 0, end_col = -1 } }
 	table.insert(selectable_lines, line_num)
 	line_to_file[line_num] = { is_category = true, section = "staged", files = status.staged }
 	line_num = line_num + 1
@@ -732,8 +816,9 @@ M.show = function()
 			local keybind = keybind_diff
 			keybind_idx = keybind_idx + 1
 
-			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
-			table.insert(lines, line)
+			local formatted = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
+			table.insert(lines, formatted.line)
+			line_highlights[line_num] = formatted.highlights
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "staged", index = i, entry = entry }
 			line_num = line_num + 1
@@ -746,6 +831,7 @@ M.show = function()
 
 	-- Unstaged section
 	table.insert(lines, string.format("Changes (%d)", #status.unstaged))
+	line_highlights[line_num] = { { group = "BaGitMenuHeader", start_col = 0, end_col = -1 } }
 	table.insert(selectable_lines, line_num)
 	line_to_file[line_num] = { is_category = true, section = "unstaged", files = status.unstaged }
 	line_num = line_num + 1
@@ -770,8 +856,9 @@ M.show = function()
 			local keybind = keybind_diff
 			keybind_idx = keybind_idx + 1
 
-			local line = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
-			table.insert(lines, line)
+			local formatted = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
+			table.insert(lines, formatted.line)
+			line_highlights[line_num] = formatted.highlights
 			table.insert(selectable_lines, line_num)
 			line_to_file[line_num] = { section = "unstaged", index = i, entry = entry }
 			line_num = line_num + 1
@@ -810,11 +897,19 @@ M.show = function()
 	-- Set buffer content
 	vim.api.nvim_buf_set_option(state.buf, "modifiable", true)
 	vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, state.lines)
+
+	-- Apply syntax highlights to all lines
+	for line_idx, highlights in pairs(line_highlights) do
+		for _, hl in ipairs(highlights) do
+			vim.api.nvim_buf_add_highlight(state.buf, ns_id_syntax, hl.group, line_idx - 1, hl.start_col, hl.end_col)
+		end
+	end
+
 	vim.api.nvim_buf_set_option(state.buf, "modifiable", false)
 
 	-- Apply highlight to initial cursor line
 	if state.current_line then
-		vim.api.nvim_buf_add_highlight(state.buf, ns_id, "BaGitMenuSelected", state.current_line - 1, 0, -1)
+		vim.api.nvim_buf_add_highlight(state.buf, ns_id_selection, "BaGitMenuSelected", state.current_line - 1, 0, -1)
 	end
 
 	-- Move vim cursor to initial line
