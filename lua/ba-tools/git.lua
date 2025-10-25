@@ -170,4 +170,58 @@ M.restore_file = function(filepath)
 	return true
 end
 
+-- Get current PR information for the current branch
+M.get_current_pr = function()
+	-- Check if gh CLI is available
+	local gh_check = vim.fn.system("which gh 2>/dev/null")
+	if vim.v.shell_error ~= 0 then
+		return nil, "gh CLI not found. Please install GitHub CLI."
+	end
+
+	-- Get PR for current branch including base branch info
+	local cmd = "gh pr view --json number,title,state,files,baseRefName,headRefName 2>&1"
+	local output = vim.fn.system(cmd)
+
+	if vim.v.shell_error ~= 0 then
+		-- No PR found for current branch
+		return nil, "No pull request found for current branch"
+	end
+
+	-- Parse JSON output
+	local success, pr_data = pcall(vim.fn.json_decode, output)
+	if not success or not pr_data then
+		return nil, "Failed to parse PR data"
+	end
+
+	return pr_data
+end
+
+-- Get files changed in a PR with their review status
+M.get_pr_files = function()
+	local pr_data, err = M.get_current_pr()
+	if not pr_data then
+		return nil, err
+	end
+
+	-- The files are included in the pr_data from get_current_pr
+	-- files format: [ { path = "...", additions = N, deletions = N, ... } ]
+	local files = pr_data.files or {}
+
+	-- For now, we don't have easy access to review status per file via gh CLI
+	-- We would need to use gh api for more detailed review info
+	-- Returning files with placeholder review status
+	local result = {}
+	for _, file in ipairs(files) do
+		table.insert(result, {
+			file = file.path,
+			additions = file.additions or 0,
+			deletions = file.deletions or 0,
+			-- Review status would require additional gh api call
+			reviewed = false, -- Placeholder
+		})
+	end
+
+	return result
+end
+
 return M
