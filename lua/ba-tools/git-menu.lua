@@ -1452,6 +1452,66 @@ local function toggle_review_status()
 	})
 end
 
+-- Revert a file to base branch in PR mode (delete new files, restore modified/deleted files)
+local function revert_pr_file()
+	-- Only works in PR mode
+	if state.current_mode ~= "pr" then
+		vim.notify("This action is only available in Pull Request mode", vim.log.levels.WARN)
+		return
+	end
+
+	local file_info = get_current_file()
+	if not file_info or not file_info.entry then
+		return
+	end
+
+	-- Cannot revert a category
+	if file_info.is_category then
+		vim.notify("Cannot revert category. Select individual files.", vim.log.levels.WARN)
+		return
+	end
+
+	local filepath = file_info.entry.file
+	local status = file_info.entry.status
+
+	-- Get base branch from PR data
+	local pr_data, err = git.get_current_pr()
+	local base_ref = "main" -- fallback
+	if pr_data and pr_data.baseRefName then
+		base_ref = pr_data.baseRefName
+	end
+
+	-- Determine action based on status
+	local action_desc
+	if status == "A" then
+		action_desc = string.format("delete '%s' (new file in PR)", filepath)
+	elseif status == "D" then
+		action_desc = string.format("restore '%s' from '%s' (deleted in PR)", filepath, base_ref)
+	else
+		action_desc = string.format("revert '%s' to '%s' branch", filepath, base_ref)
+	end
+
+	-- Confirm before reverting
+	local choice = vim.fn.confirm(
+		string.format("Are you sure you want to %s?", action_desc),
+		"&Yes\n&No",
+		2
+	)
+
+	if choice ~= 1 then
+		return
+	end
+
+	-- Execute revert
+	local success, revert_err = git.revert_to_base(filepath, base_ref)
+	if success then
+		vim.notify(string.format("Reverted: %s", filepath), vim.log.levels.INFO)
+		refresh_menu()
+	else
+		vim.notify(revert_err, vim.log.levels.ERROR)
+	end
+end
+
 -- Toggle (stage/unstage) all files at the current file's path
 local function toggle_path()
 	-- Only works in status mode
@@ -1570,7 +1630,13 @@ local function setup_keymaps(buf)
 	vim.keymap.set("n", "o", open_file, opts)
 	vim.keymap.set("n", "s", toggle_stage, opts)
 	vim.keymap.set("n", "d", discard_changes, opts)
-	vim.keymap.set("n", "r", revert_unstaged, opts)
+	vim.keymap.set("n", "r", function()
+		if state.current_mode == "status" then
+			revert_unstaged()
+		else -- pr mode
+			revert_pr_file()
+		end
+	end, opts)
 	vim.keymap.set("n", "p", toggle_path, opts)
 	vim.keymap.set("n", "c", toggle_review_status, opts)
 

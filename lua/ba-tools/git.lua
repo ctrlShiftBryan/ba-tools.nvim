@@ -188,6 +188,49 @@ M.restore_file = function(filepath)
 	return true
 end
 
+-- Revert a file to its state in a specific branch (for PR mode)
+-- Handles: new files (delete), modified files (restore), deleted files (restore)
+M.revert_to_base = function(filepath, base_ref)
+	-- Check if file exists in base branch
+	local check_cmd = string.format(
+		"git cat-file -e %s:%s 2>/dev/null",
+		vim.fn.shellescape(base_ref),
+		vim.fn.shellescape(filepath)
+	)
+	vim.fn.system(check_cmd)
+	local exists = vim.v.shell_error == 0
+
+	local cmd
+	if not exists then
+		-- File doesn't exist in base branch (new file) - delete it
+		-- First unstage if staged
+		local unstage_cmd = string.format("git restore --staged %s 2>/dev/null", vim.fn.shellescape(filepath))
+		vim.fn.system(unstage_cmd)
+
+		-- Then delete the file
+		cmd = string.format("rm -rf %s 2>&1", vim.fn.shellescape(filepath))
+	else
+		-- File exists in base branch - restore from it
+		-- This handles both modified and deleted files
+		-- First unstage if staged
+		local unstage_cmd = string.format("git restore --staged %s 2>/dev/null", vim.fn.shellescape(filepath))
+		vim.fn.system(unstage_cmd)
+
+		-- Then restore from base branch
+		cmd = string.format(
+			"git restore --source=%s -- %s 2>&1",
+			vim.fn.shellescape(base_ref),
+			vim.fn.shellescape(filepath)
+		)
+	end
+
+	local output = vim.fn.system(cmd)
+	if vim.v.shell_error ~= 0 then
+		return false, "Failed to revert file: " .. output
+	end
+	return true
+end
+
 -- Get current PR information for the current branch
 M.get_current_pr = function()
 	-- Check if gh CLI is available
