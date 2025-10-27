@@ -70,6 +70,40 @@ local state = {
 	keybind_to_line_direct = {}, -- Map uppercase keybind to line number (opens directly)
 }
 
+-- Helper function to get GitHub hostname using gh CLI
+local function get_github_hostname()
+	-- Try to get repo URL from gh CLI which includes the hostname
+	local repo_info = vim.fn.system("gh repo view --json url 2>&1"):gsub("%s+$", "")
+	if vim.v.shell_error == 0 then
+		local success, repo = pcall(vim.fn.json_decode, repo_info)
+		if success and repo and repo.url then
+			-- Extract hostname from URL (e.g., https://git.somelocalgithub.com/xxx/app)
+			local hostname = repo.url:match("https://([^/]+)/")
+			if hostname then
+				return hostname
+			end
+		end
+	end
+
+	-- Fallback: extract from git remote URL
+	local remote_url = vim.fn.system("git remote get-url origin 2>&1"):gsub("%s+$", "")
+	if vim.v.shell_error == 0 then
+		-- SSH format: git@hostname:owner/repo.git
+		local hostname = remote_url:match("git@([^:]+):")
+		if hostname then
+			return hostname
+		end
+
+		-- HTTPS format: https://hostname/owner/repo.git
+		hostname = remote_url:match("https://([^/]+)/")
+		if hostname then
+			return hostname
+		end
+	end
+
+	return nil
+end
+
 -- Reset state
 local function reset_state()
 	state = {
@@ -461,7 +495,7 @@ local function render_status_mode()
 end
 
 -- Async function to fetch PR files in background
-local function fetch_pr_files_async(pr_data)
+local function fetch_pr_files_async(pr_data, hostname)
 	-- Build the GraphQL query command
 	local query = string.format([[
 		query {
@@ -481,11 +515,24 @@ local function fetch_pr_files_async(pr_data)
 		}
 	]], pr_data.owner_login, pr_data.repo_name, pr_data.number)
 
-	local cmd = string.format("gh api graphql -f query=%s", vim.fn.shellescape(query))
+	-- Build gh command with hostname via GH_HOST environment variable
+	local cmd
+	if hostname and hostname ~= "github.com" then
+		cmd = string.format("GH_HOST=%s gh api graphql -f query=%s",
+			vim.fn.shellescape(hostname), vim.fn.shellescape(query))
+	else
+		cmd = string.format("gh api graphql -f query=%s", vim.fn.shellescape(query))
+	end
+
+	-- Debug: log hostname if not github.com
+	if hostname and hostname ~= "github.com" then
+		vim.notify("Fetching PR files from: " .. hostname, vim.log.levels.INFO)
+	end
 
 	-- Start async job
 	vim.fn.jobstart(cmd, {
 		stdout_buffered = true,
+		stderr_buffered = true,
 		on_stdout = function(_, data)
 			if not data then return end
 			local output = table.concat(data, "\n")
@@ -493,7 +540,10 @@ local function fetch_pr_files_async(pr_data)
 			vim.schedule(function()
 				-- Parse the JSON response
 				local success, graphql_result = pcall(vim.fn.json_decode, output)
-				if success and graphql_result and graphql_result.data then
+				if success and graphql_result and graphql_result.data and
+				   graphql_result.data.repository and
+				   type(graphql_result.data.repository) == "table" and
+				   graphql_result.data.repository.pullRequest then
 					local pr = graphql_result.data.repository.pullRequest
 					local pr_id = pr.id
 					local files = pr.files.nodes or {}
@@ -523,7 +573,23 @@ local function fetch_pr_files_async(pr_data)
 						refresh_menu()
 					end
 				else
-					-- Failed to parse, use fallback
+					-- Failed to parse or repository/PR not found, use fallback
+					-- Log error for debugging
+					if success and graphql_result then
+						if graphql_result.errors then
+							vim.notify("GitHub API error: " .. vim.inspect(graphql_result.errors), vim.log.levels.WARN)
+						elseif not graphql_result.data then
+							vim.notify("GitHub API returned no data", vim.log.levels.WARN)
+						elseif not graphql_result.data.repository then
+							vim.notify("Repository not found in response", vim.log.levels.WARN)
+						elseif type(graphql_result.data.repository) ~= "table" then
+							vim.notify("Repository field is not a table", vim.log.levels.WARN)
+						else
+							vim.notify("Pull request not found in repository", vim.log.levels.WARN)
+						end
+					elseif not success then
+						vim.notify("Failed to parse GitHub API response: " .. tostring(graphql_result), vim.log.levels.WARN)
+					end
 					local pr_files = {}
 					for _, file in ipairs(pr_data.files or {}) do
 						table.insert(pr_files, {
@@ -546,9 +612,19 @@ local function fetch_pr_files_async(pr_data)
 				end
 			end)
 		end,
+		on_stderr = function(_, data)
+			if not data then return end
+			local error_output = table.concat(data, "\n")
+			if error_output ~= "" then
+				vim.schedule(function()
+					vim.notify("GitHub API stderr: " .. error_output, vim.log.levels.WARN)
+				end)
+			end
+		end,
 		on_exit = function(_, exit_code)
 			if exit_code ~= 0 then
 				vim.schedule(function()
+					vim.notify("GitHub API command failed with exit code: " .. exit_code, vim.log.levels.WARN)
 					-- Use fallback data
 					if pr_data.files then
 						local pr_files = {}
@@ -638,7 +714,10 @@ local function render_pr_mode()
 		-- Need to fetch - show loading message and start async fetch
 		pr_loading = true
 
-		-- Get repo info for GraphQL query
+		-- Get GitHub hostname for enterprise instances
+		local hostname = get_github_hostname()
+
+		-- Get repo info for GraphQL query (gh repo view auto-detects host from git remote)
 		local repo_info = vim.fn.system("gh repo view --json owner,name 2>&1")
 		if vim.v.shell_error == 0 then
 			local success, repo = pcall(vim.fn.json_decode, repo_info)
@@ -647,7 +726,7 @@ local function render_pr_mode()
 				pr_data.repo_name = repo.name
 
 				-- Start async fetch
-				fetch_pr_files_async(pr_data)
+				fetch_pr_files_async(pr_data, hostname)
 			end
 		end
 
@@ -1410,18 +1489,36 @@ local function toggle_review_status()
 	local new_status_text = new_reviewed_status and "reviewed" or "unreviewed"
 	vim.notify(string.format("Marking as %s: %s", new_status_text, filepath), vim.log.levels.INFO)
 
+	-- Get GitHub hostname for enterprise instances
+	local hostname = get_github_hostname()
+
 	-- Run API call in background using jobstart (non-blocking)
-	local cmd = string.format(
-		"gh api graphql -f query=%s",
-		vim.fn.shellescape(string.format(
-			[[mutation { %s(input: {pullRequestId: "%s", path: "%s"}) { pullRequest { id } } }]],
-			new_reviewed_status and "markFileAsViewed" or "unmarkFileAsViewed",
-			pr_id,
-			filepath
-		))
+	local mutation = string.format(
+		[[mutation { %s(input: {pullRequestId: "%s", path: "%s"}) { pullRequest { id } } }]],
+		new_reviewed_status and "markFileAsViewed" or "unmarkFileAsViewed",
+		pr_id,
+		filepath
 	)
 
+	local cmd
+	if hostname and hostname ~= "github.com" then
+		cmd = string.format("GH_HOST=%s gh api graphql -f query=%s",
+			vim.fn.shellescape(hostname), vim.fn.shellescape(mutation))
+	else
+		cmd = string.format("gh api graphql -f query=%s", vim.fn.shellescape(mutation))
+	end
+
 	vim.fn.jobstart(cmd, {
+		stderr_buffered = true,
+		on_stderr = function(_, data)
+			if not data then return end
+			local error_output = table.concat(data, "\n")
+			if error_output ~= "" then
+				vim.schedule(function()
+					vim.notify("Failed to toggle review status: " .. error_output, vim.log.levels.ERROR)
+				end)
+			end
+		end,
 		on_exit = function(_, exit_code)
 			if exit_code ~= 0 then
 				-- API call failed - revert the cache update and refresh
@@ -1440,7 +1537,7 @@ local function toggle_review_status()
 					end
 
 					vim.notify(
-						string.format("Failed to sync review status for: %s", filepath),
+						string.format("Failed to sync review status for: %s (exit code: %d)", filepath, exit_code),
 						vim.log.levels.ERROR
 					)
 				end)
