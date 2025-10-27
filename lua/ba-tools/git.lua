@@ -15,6 +15,7 @@ M.get_status = function()
 		return nil, "Failed to get git status"
 	end
 
+	local conflicts = {}
 	local staged = {}
 	local unstaged = {}
 
@@ -23,6 +24,7 @@ M.get_status = function()
 	-- X = staged status, Y = unstaged status
 	-- ' ' = not changed, M = modified, A = added, D = deleted, R = renamed, C = copied
 	-- ?? = untracked
+	-- Conflict codes: UU, AA, DD, AU, UA, DU, UD
 	for line in output:gmatch("[^\n]+") do
 		if line ~= "" then
 			local status_code = line:sub(1, 2)
@@ -31,45 +33,61 @@ M.get_status = function()
 			local staged_char = status_code:sub(1, 1)
 			local unstaged_char = status_code:sub(2, 2)
 
-			-- Handle staged changes
-			if staged_char ~= " " and staged_char ~= "?" then
-				local status_display = "M" -- Default to modified
-				if staged_char == "A" then
-					status_display = "A"
-				elseif staged_char == "D" then
-					status_display = "D"
-				elseif staged_char == "R" then
-					status_display = "R"
-				elseif staged_char == "C" then
-					status_display = "C"
-				end
-
-				table.insert(staged, {
+			-- Check for merge conflicts first
+			local is_conflict = false
+			if status_code == "UU" or status_code == "AA" or status_code == "DD" or
+			   status_code == "AU" or status_code == "UA" or status_code == "DU" or status_code == "UD" then
+				is_conflict = true
+				table.insert(conflicts, {
 					file = filepath,
-					status = status_display,
+					status = "C", -- C for Conflict
+					conflict_type = status_code,
 				})
 			end
 
-			-- Handle unstaged changes
-			if unstaged_char ~= " " or status_code == "??" then
-				local status_display = "M" -- Default to modified
-				if status_code == "??" then
-					status_display = "U" -- Untracked
-				elseif unstaged_char == "M" then
-					status_display = "M" -- Modified
-				elseif unstaged_char == "D" then
-					status_display = "D"
+			-- Only process as staged/unstaged if not a conflict
+			if not is_conflict then
+				-- Handle staged changes
+				if staged_char ~= " " and staged_char ~= "?" then
+					local status_display = "M" -- Default to modified
+					if staged_char == "A" then
+						status_display = "A"
+					elseif staged_char == "D" then
+						status_display = "D"
+					elseif staged_char == "R" then
+						status_display = "R"
+					elseif staged_char == "C" then
+						status_display = "C"
+					end
+
+					table.insert(staged, {
+						file = filepath,
+						status = status_display,
+					})
 				end
 
-				table.insert(unstaged, {
-					file = filepath,
-					status = status_display,
-				})
+				-- Handle unstaged changes
+				if unstaged_char ~= " " or status_code == "??" then
+					local status_display = "M" -- Default to modified
+					if status_code == "??" then
+						status_display = "U" -- Untracked
+					elseif unstaged_char == "M" then
+						status_display = "M" -- Modified
+					elseif unstaged_char == "D" then
+						status_display = "D"
+					end
+
+					table.insert(unstaged, {
+						file = filepath,
+						status = status_display,
+					})
+				end
 			end
 		end
 	end
 
 	return {
+		conflicts = conflicts,
 		staged = staged,
 		unstaged = unstaged,
 	}
@@ -196,32 +214,167 @@ M.get_current_pr = function()
 	return pr_data
 end
 
--- Get files changed in a PR with their review status
+-- Get files changed in a PR with their review status using GraphQL
 M.get_pr_files = function()
+	-- Check if gh CLI is available
+	local gh_check = vim.fn.system("which gh 2>/dev/null")
+	if vim.v.shell_error ~= 0 then
+		return nil, "gh CLI not found. Please install GitHub CLI."
+	end
+
+	-- GraphQL query to get PR with node ID and file viewed states
+	local query = [[
+		query {
+			repository(owner: "{owner}", name: "{repo}") {
+				pullRequest(number: {number}) {
+					id
+					files(first: 100) {
+						nodes {
+							path
+							additions
+							deletions
+							viewerViewedState
+						}
+					}
+				}
+			}
+		}
+	]]
+
+	-- Get current PR number and repo info
 	local pr_data, err = M.get_current_pr()
 	if not pr_data then
 		return nil, err
 	end
 
-	-- The files are included in the pr_data from get_current_pr
-	-- files format: [ { path = "...", additions = N, deletions = N, ... } ]
-	local files = pr_data.files or {}
+	-- Get repo owner and name
+	local repo_info = vim.fn.system("gh repo view --json owner,name 2>&1")
+	if vim.v.shell_error ~= 0 then
+		return nil, "Failed to get repository info"
+	end
 
-	-- For now, we don't have easy access to review status per file via gh CLI
-	-- We would need to use gh api for more detailed review info
-	-- Returning files with placeholder review status
+	local success, repo = pcall(vim.fn.json_decode, repo_info)
+	if not success or not repo then
+		return nil, "Failed to parse repository info"
+	end
+
+	-- Replace placeholders in query
+	query = query:gsub("{owner}", repo.owner.login)
+	query = query:gsub("{repo}", repo.name)
+	query = query:gsub("{number}", pr_data.number)
+
+	-- Execute GraphQL query
+	local cmd = string.format("gh api graphql -f query=%s 2>&1", vim.fn.shellescape(query))
+	local output = vim.fn.system(cmd)
+
+	if vim.v.shell_error ~= 0 then
+		-- Fallback to simple file list without viewed status if GraphQL fails
+		local files = pr_data.files or {}
+		local result = {}
+		for _, file in ipairs(files) do
+			table.insert(result, {
+				file = file.path,
+				additions = file.additions or 0,
+				deletions = file.deletions or 0,
+				reviewed = false,
+				pr_id = nil, -- No PR ID available in fallback
+			})
+		end
+		return result
+	end
+
+	-- Parse GraphQL response
+	local success2, graphql_result = pcall(vim.fn.json_decode, output)
+	if not success2 or not graphql_result then
+		return nil, "Failed to parse GraphQL response"
+	end
+
+	-- Extract PR ID and files
+	local pr = graphql_result.data.repository.pullRequest
+	local pr_id = pr.id
+	local files = pr.files.nodes or {}
+
+	-- Build result with viewed status
 	local result = {}
 	for _, file in ipairs(files) do
 		table.insert(result, {
 			file = file.path,
 			additions = file.additions or 0,
 			deletions = file.deletions or 0,
-			-- Review status would require additional gh api call
-			reviewed = false, -- Placeholder
+			-- viewerViewedState can be: VIEWED, UNVIEWED, or DISMISSED
+			reviewed = file.viewerViewedState == "VIEWED",
+			pr_id = pr_id,
 		})
 	end
 
 	return result
+end
+
+-- Mark a file as viewed in a PR
+M.mark_file_as_viewed = function(pr_id, filepath)
+	if not pr_id then
+		return false, "PR ID is required"
+	end
+
+	-- GraphQL mutation to mark file as viewed
+	local mutation = [[
+		mutation {
+			markFileAsViewed(input: {pullRequestId: "%s", path: "%s"}) {
+				pullRequest {
+					id
+				}
+			}
+		}
+	]]
+
+	mutation = string.format(mutation, pr_id, filepath)
+
+	local cmd = string.format("gh api graphql -f query=%s 2>&1", vim.fn.shellescape(mutation))
+	local output = vim.fn.system(cmd)
+
+	if vim.v.shell_error ~= 0 then
+		return false, "Failed to mark file as viewed: " .. output
+	end
+
+	return true
+end
+
+-- Unmark a file as viewed in a PR
+M.unmark_file_as_viewed = function(pr_id, filepath)
+	if not pr_id then
+		return false, "PR ID is required"
+	end
+
+	-- GraphQL mutation to unmark file as viewed
+	local mutation = [[
+		mutation {
+			unmarkFileAsViewed(input: {pullRequestId: "%s", path: "%s"}) {
+				pullRequest {
+					id
+				}
+			}
+		}
+	]]
+
+	mutation = string.format(mutation, pr_id, filepath)
+
+	local cmd = string.format("gh api graphql -f query=%s 2>&1", vim.fn.shellescape(mutation))
+	local output = vim.fn.system(cmd)
+
+	if vim.v.shell_error ~= 0 then
+		return false, "Failed to unmark file as viewed: " .. output
+	end
+
+	return true
+end
+
+-- Toggle file viewed status in a PR
+M.toggle_file_viewed = function(pr_id, filepath, is_reviewed)
+	if is_reviewed then
+		return M.unmark_file_as_viewed(pr_id, filepath)
+	else
+		return M.mark_file_as_viewed(pr_id, filepath)
+	end
 end
 
 return M

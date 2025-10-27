@@ -47,6 +47,7 @@ Opens a centered floating window showing git status with staged and unstaged cha
 
 **Visual Features:**
 - 🎨 **Colorful status indicators:**
+  - `✗` Conflict (red) - merge conflicts
   - `+` Added (green)
   - `●` Modified (yellow)
   - `−` Deleted (red)
@@ -57,6 +58,7 @@ Opens a centered floating window showing git status with staged and unstaged cha
 - 🎨 **Bold section headers**
 - ⚡ **Auto-close on window leave** (temporary overlay behavior)
 - 🚀 **Batch git operations** for fast multi-file staging/unstaging
+- 🔥 **Merge conflict detection** - conflicts shown in dedicated "Merge Changes" section with priority keybinds
 
 **Keymaps:**
 - `↓`/`↑` - Navigate up/down through files (includes category headers)
@@ -83,10 +85,25 @@ Opens a centered floating window showing git status with staged and unstaged cha
 - `d` - Discard changes to file (with confirmation prompt)
   - For untracked files: deletes the file
   - For tracked files: restores from HEAD
+  - **For merge conflicts:** Resolves by accepting incoming changes (theirs) and auto-stages
   - Cannot discard staged changes (unstage first with `s`)
   - Not available on category headers
+- `r` - Revert unstaged changes
+  - For unstaged files: restores from staged version or HEAD
+  - **For merge conflicts:** Resolves by keeping your local changes (ours) and auto-stages
 - `q`/`<Esc>` - Close menu
 - **Window navigation** (`C-h`, `C-l`, etc.) - Automatically closes the menu (temporary overlay behavior)
+
+**Merge Conflict Handling:**
+When merge conflicts are detected, a "Merge Changes" section appears at the top with:
+- 🔥 Conflicts get **priority keybinds** (first in sequence) for quick access
+- ✗ **Visual distinction** with red conflict indicator
+- 🚀 **Resolution options:**
+  - `r` - Quick resolve: Keep your local changes (ours) and auto-stage
+  - `d` - Quick resolve: Accept incoming changes (theirs) and auto-stage
+  - `o`/`<CR>` - Open file to manually edit conflict markers
+  - `s` - Stage after manually resolving (git validates resolution)
+- After resolving, files move to "Staged Changes" section
 
 **Recommended Keybinding:** `<C-g>` for quick access (like Harpoon's `C-e`)
 

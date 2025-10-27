@@ -45,6 +45,16 @@ local keybind_sequence_direct = {
 local last_selected_file = nil
 local last_mode = "status" -- Remember last mode (status or pr)
 
+-- Cache for PR files data (speeds up refresh operations)
+local pr_files_cache = {
+	pr_number = nil,
+	data = nil,
+	timestamp = 0,
+}
+
+-- Loading state for PR mode
+local pr_loading = false
+
 -- State for the current menu instance
 local state = {
 	buf = nil,
@@ -54,6 +64,7 @@ local state = {
 	current_mode = "status", -- "status" or "pr"
 	lines = {},
 	line_to_file = {}, -- Map line number to file entry
+	line_highlights = {}, -- Store highlights for optimistic updates
 	selectable_lines = {}, -- Lines that can be selected
 	keybind_to_line_diff = {}, -- Map lowercase keybind to line number (opens diff)
 	keybind_to_line_direct = {}, -- Map uppercase keybind to line number (opens directly)
@@ -69,6 +80,7 @@ local function reset_state()
 		current_mode = last_mode, -- Restore last mode
 		lines = {},
 		line_to_file = {},
+		line_highlights = {},
 		selectable_lines = {},
 		keybind_to_line_diff = {},
 		keybind_to_line_direct = {},
@@ -211,11 +223,27 @@ local function render_status_mode()
 		return nil
 	end
 
-	-- If no changes, close the menu
-	if #status.staged == 0 and #status.unstaged == 0 then
-		vim.notify("No changes to display", vim.log.levels.INFO)
-		close_menu()
-		return nil
+	-- If no changes, display message but keep menu open for PR mode access
+	if #status.conflicts == 0 and #status.staged == 0 and #status.unstaged == 0 then
+		local lines = {}
+		local line_highlights = {}
+		local selectable_lines = {}
+		local line_to_file = {}
+
+		table.insert(lines, "")
+		table.insert(lines, "No changes to display")
+		table.insert(lines, "")
+		line_highlights[2] = { { group = "BaGitMenuHeader", start_col = 0, end_col = -1 } }
+
+		return {
+			lines = lines,
+			line_highlights = line_highlights,
+			selectable_lines = selectable_lines,
+			line_to_file = line_to_file,
+			keybind_to_line_diff = {},
+			keybind_to_line_direct = {},
+			target_line = nil,
+		}
 	end
 
 	-- Remember current section and index to maintain position after refresh
@@ -231,6 +259,15 @@ local function render_status_mode()
 	local max_filename_width = 0
 	local has_devicons, devicons = pcall(require, "nvim-web-devicons")
 
+	for _, entry in ipairs(status.conflicts) do
+		local filename = vim.fn.fnamemodify(entry.file, ":t")
+		local width = #filename
+		-- Add icon width if devicons available (icon + space = ~3 chars)
+		if has_devicons then
+			width = width + 3
+		end
+		max_filename_width = math.max(max_filename_width, width)
+	end
 	for _, entry in ipairs(status.staged) do
 		local filename = vim.fn.fnamemodify(entry.file, ":t")
 		local width = #filename
@@ -259,6 +296,46 @@ local function render_status_mode()
 	local keybind_to_line_diff = {}
 	local keybind_to_line_direct = {}
 	local keybind_idx = 1 -- Track keybind assignment
+
+	-- Merge Changes section (conflicts have highest priority)
+	if #status.conflicts > 0 then
+		table.insert(lines, string.format("Merge Changes (%d)", #status.conflicts))
+		line_highlights[line_num] = { { group = "BaGitMenuHeader", start_col = 0, end_col = -1 } }
+		table.insert(selectable_lines, line_num)
+		line_to_file[line_num] = { is_category = true, section = "conflicts", files = status.conflicts }
+		line_num = line_num + 1
+
+		for i, entry in ipairs(status.conflicts) do
+			-- Assign both lowercase (diff) and uppercase (direct) keybinds
+			local keybind_diff = nil
+			local keybind_direct = nil
+
+			if keybind_idx <= #keybind_sequence_diff then
+				keybind_diff = keybind_sequence_diff[keybind_idx]
+				keybind_to_line_diff[keybind_diff] = line_num
+			end
+
+			if keybind_idx <= #keybind_sequence_direct then
+				keybind_direct = keybind_sequence_direct[keybind_idx]
+				keybind_to_line_direct[keybind_direct] = line_num
+			end
+
+			-- Use lowercase keybind for display
+			local keybind = keybind_diff
+			keybind_idx = keybind_idx + 1
+
+			local formatted = ui.format_file_line(entry.file, entry.status, state.width, max_filename_width, keybind)
+			table.insert(lines, formatted.line)
+			line_highlights[line_num] = formatted.highlights
+			table.insert(selectable_lines, line_num)
+			line_to_file[line_num] = { section = "conflicts", index = i, entry = entry }
+			line_num = line_num + 1
+		end
+
+		-- Empty line separator
+		table.insert(lines, "")
+		line_num = line_num + 1
+	end
 
 	-- Staged section
 	table.insert(lines, string.format("Staged Changes (%d)", #status.staged))
@@ -383,6 +460,123 @@ local function render_status_mode()
 	}
 end
 
+-- Async function to fetch PR files in background
+local function fetch_pr_files_async(pr_data)
+	-- Build the GraphQL query command
+	local query = string.format([[
+		query {
+			repository(owner: "%s", name: "%s") {
+				pullRequest(number: %d) {
+					id
+					files(first: 100) {
+						nodes {
+							path
+							additions
+							deletions
+							viewerViewedState
+						}
+					}
+				}
+			}
+		}
+	]], pr_data.owner_login, pr_data.repo_name, pr_data.number)
+
+	local cmd = string.format("gh api graphql -f query=%s", vim.fn.shellescape(query))
+
+	-- Start async job
+	vim.fn.jobstart(cmd, {
+		stdout_buffered = true,
+		on_stdout = function(_, data)
+			if not data then return end
+			local output = table.concat(data, "\n")
+
+			vim.schedule(function()
+				-- Parse the JSON response
+				local success, graphql_result = pcall(vim.fn.json_decode, output)
+				if success and graphql_result and graphql_result.data then
+					local pr = graphql_result.data.repository.pullRequest
+					local pr_id = pr.id
+					local files = pr.files.nodes or {}
+
+					-- Build result with viewed status
+					local pr_files = {}
+					for _, file in ipairs(files) do
+						table.insert(pr_files, {
+							file = file.path,
+							additions = file.additions or 0,
+							deletions = file.deletions or 0,
+							reviewed = file.viewerViewedState == "VIEWED",
+							pr_id = pr_id,
+						})
+					end
+
+					-- Update cache
+					pr_files_cache.pr_number = pr_data.number
+					pr_files_cache.data = pr_files
+					pr_files_cache.timestamp = os.time()
+
+					-- Mark as no longer loading
+					pr_loading = false
+
+					-- Refresh the menu with new data
+					if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+						refresh_menu()
+					end
+				else
+					-- Failed to parse, use fallback
+					local pr_files = {}
+					for _, file in ipairs(pr_data.files or {}) do
+						table.insert(pr_files, {
+							file = file.path,
+							additions = file.additions or 0,
+							deletions = file.deletions or 0,
+							reviewed = false,
+							pr_id = nil,
+						})
+					end
+
+					pr_files_cache.pr_number = pr_data.number
+					pr_files_cache.data = pr_files
+					pr_files_cache.timestamp = os.time()
+					pr_loading = false
+
+					if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+						refresh_menu()
+					end
+				end
+			end)
+		end,
+		on_exit = function(_, exit_code)
+			if exit_code ~= 0 then
+				vim.schedule(function()
+					-- Use fallback data
+					if pr_data.files then
+						local pr_files = {}
+						for _, file in ipairs(pr_data.files) do
+							table.insert(pr_files, {
+								file = file.path,
+								additions = file.additions or 0,
+								deletions = file.deletions or 0,
+								reviewed = false,
+								pr_id = nil,
+							})
+						end
+
+						pr_files_cache.pr_number = pr_data.number
+						pr_files_cache.data = pr_files
+						pr_files_cache.timestamp = os.time()
+					end
+
+					pr_loading = false
+					if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+						refresh_menu()
+					end
+				end)
+			end
+		end,
+	})
+end
+
 -- Render PR mode
 local function render_pr_mode()
 	local lines = {}
@@ -392,7 +586,7 @@ local function render_pr_mode()
 	local keybind_to_line_diff = {}
 	local keybind_to_line_direct = {}
 
-	-- Check if there's a PR for the current branch
+	-- Check if there's a PR for the current branch (this is fast, uses gh pr view)
 	local pr_data, err = git.get_current_pr()
 
 	if not pr_data then
@@ -413,8 +607,66 @@ local function render_pr_mode()
 		}
 	end
 
-	-- Get PR files
-	local pr_files = pr_data.files or {}
+	-- Get PR files with review status (with caching)
+	local pr_files
+	local current_time = os.time()
+	local cache_ttl = 120 -- Cache for 30 seconds to speed up refreshes
+
+	-- Check if cache is valid
+	if pr_files_cache.pr_number == pr_data.number and
+	   pr_files_cache.data and
+	   (current_time - pr_files_cache.timestamp) < cache_ttl then
+		-- Use cached data (instant!)
+		pr_files = pr_files_cache.data
+	elseif pr_loading then
+		-- Already loading, show loading message
+		table.insert(lines, "")
+		table.insert(lines, "Loading PR files...")
+		table.insert(lines, "")
+		line_highlights[2] = { { group = "BaGitMenuHeader", start_col = 0, end_col = -1 } }
+
+		return {
+			lines = lines,
+			line_highlights = line_highlights,
+			selectable_lines = selectable_lines,
+			line_to_file = line_to_file,
+			keybind_to_line_diff = keybind_to_line_diff,
+			keybind_to_line_direct = keybind_to_line_direct,
+			target_line = nil,
+		}
+	else
+		-- Need to fetch - show loading message and start async fetch
+		pr_loading = true
+
+		-- Get repo info for GraphQL query
+		local repo_info = vim.fn.system("gh repo view --json owner,name 2>&1")
+		if vim.v.shell_error == 0 then
+			local success, repo = pcall(vim.fn.json_decode, repo_info)
+			if success and repo then
+				pr_data.owner_login = repo.owner.login
+				pr_data.repo_name = repo.name
+
+				-- Start async fetch
+				fetch_pr_files_async(pr_data)
+			end
+		end
+
+		-- Return loading display immediately
+		table.insert(lines, "")
+		table.insert(lines, "Loading PR files...")
+		table.insert(lines, "")
+		line_highlights[2] = { { group = "BaGitMenuHeader", start_col = 0, end_col = -1 } }
+
+		return {
+			lines = lines,
+			line_highlights = line_highlights,
+			selectable_lines = selectable_lines,
+			line_to_file = line_to_file,
+			keybind_to_line_diff = keybind_to_line_diff,
+			keybind_to_line_direct = keybind_to_line_direct,
+			target_line = nil,
+		}
+	end
 
 	-- Remember current file to maintain position after refresh
 	local current_file_info = get_current_file()
@@ -424,13 +676,25 @@ local function render_pr_mode()
 	local max_filename_width = 0
 	local has_devicons, devicons = pcall(require, "nvim-web-devicons")
 
-	for _, file in ipairs(pr_files) do
-		local filename = vim.fn.fnamemodify(file.path, ":t")
+	for _, file_info in ipairs(pr_files) do
+		local filename = vim.fn.fnamemodify(file_info.file, ":t")
 		local width = #filename
 		if has_devicons then
 			width = width + 3
 		end
 		max_filename_width = math.max(max_filename_width, width)
+	end
+
+	-- Separate files into unchecked and checked
+	local unchecked_files = {}
+	local checked_files = {}
+
+	for _, file_info in ipairs(pr_files) do
+		if file_info.reviewed then
+			table.insert(checked_files, file_info)
+		else
+			table.insert(unchecked_files, file_info)
+		end
 	end
 
 	-- Build lines
@@ -446,82 +710,146 @@ local function render_pr_mode()
 	table.insert(lines, "")
 	line_num = line_num + 1
 
-	-- Files section header
-	table.insert(lines, string.format("Files Changed (%d)", #pr_files))
+	-- Unchecked Files section
+	table.insert(lines, string.format("Unchecked Files (%d)", #unchecked_files))
 	line_highlights[line_num] = { { group = "BaGitMenuHeader", start_col = 0, end_col = -1 } }
+	table.insert(selectable_lines, line_num)
+	line_to_file[line_num] = { is_category = true, section = "unchecked", files = unchecked_files }
 	line_num = line_num + 1
 
-	-- Render each file
-	for i, file in ipairs(pr_files) do
-		local filepath = file.path
+	-- Render unchecked files
+	if #unchecked_files > 0 then
+		for i, file_info in ipairs(unchecked_files) do
+			local filepath = file_info.file
 
-		-- Assign keybinds
-		local keybind_diff = nil
-		local keybind_direct = nil
+			-- Assign keybinds
+			local keybind_diff = nil
+			local keybind_direct = nil
 
-		if keybind_idx <= #keybind_sequence_diff then
-			keybind_diff = keybind_sequence_diff[keybind_idx]
-			keybind_to_line_diff[keybind_diff] = line_num
-		end
+			if keybind_idx <= #keybind_sequence_diff then
+				keybind_diff = keybind_sequence_diff[keybind_idx]
+				keybind_to_line_diff[keybind_diff] = line_num
+			end
 
-		if keybind_idx <= #keybind_sequence_direct then
-			keybind_direct = keybind_sequence_direct[keybind_idx]
-			keybind_to_line_direct[keybind_direct] = line_num
-		end
+			if keybind_idx <= #keybind_sequence_direct then
+				keybind_direct = keybind_sequence_direct[keybind_idx]
+				keybind_to_line_direct[keybind_direct] = line_num
+			end
 
-		local keybind = keybind_diff
-		keybind_idx = keybind_idx + 1
+			local keybind = keybind_diff
+			keybind_idx = keybind_idx + 1
 
-		-- Determine status indicator based on changes
-		-- For now, just use "M" for modified
-		local status = "M"
-		if file.additions and file.additions > 0 and (not file.deletions or file.deletions == 0) then
-			status = "A" -- Mostly additions
-		elseif file.deletions and file.deletions > 0 and (not file.additions or file.additions == 0) then
-			status = "D" -- Mostly deletions
-		end
+			-- Determine status indicator based on changes
+			local status = "M"
+			if file_info.additions and file_info.additions > 0 and (not file_info.deletions or file_info.deletions == 0) then
+				status = "A" -- Mostly additions
+			elseif file_info.deletions and file_info.deletions > 0 and (not file_info.additions or file_info.additions == 0) then
+				status = "D" -- Mostly deletions
+			end
 
-		-- Format the line similar to status mode
-		local formatted = ui.format_file_line(filepath, status, state.width, max_filename_width, keybind)
+			-- Format the line similar to status mode
+			local formatted = ui.format_file_line(filepath, status, state.width, max_filename_width, keybind)
 
-		table.insert(lines, formatted.line)
+			table.insert(lines, formatted.line)
 
-		-- Copy highlights from formatted line
-		line_highlights[line_num] = formatted.highlights
+			-- Copy highlights from formatted line
+			line_highlights[line_num] = formatted.highlights
 
-		-- For now, all files are marked as "not reviewed" since we don't have that data yet
-		local is_reviewed = false -- Placeholder
-
-		-- Add full-line text color for review status
-		-- Apply this LAST so it overrides all other text colors
-		if is_reviewed then
-			-- Green text for reviewed files
-			table.insert(line_highlights[line_num], {
-				group = "BaGitMenuPRReviewed",
-				start_col = 0,
-				end_col = -1,
-			})
-		else
-			-- Red text for not reviewed files
+			-- Add red text color for unchecked files
 			table.insert(line_highlights[line_num], {
 				group = "BaGitMenuPRNotReviewed",
 				start_col = 0,
 				end_col = -1,
 			})
-		end
 
-		table.insert(selectable_lines, line_num)
-		line_to_file[line_num] = {
-			section = "pr_files",
-			index = i,
-			entry = {
-				file = filepath,
-				status = status,
-				additions = file.additions or 0,
-				deletions = file.deletions or 0,
-			},
-		}
-		line_num = line_num + 1
+			table.insert(selectable_lines, line_num)
+			line_to_file[line_num] = {
+				section = "unchecked",
+				index = i,
+				entry = {
+					file = filepath,
+					status = status,
+					additions = file_info.additions or 0,
+					deletions = file_info.deletions or 0,
+					reviewed = false,
+					pr_id = file_info.pr_id,
+				},
+			}
+			line_num = line_num + 1
+		end
+	end
+
+	-- Empty line separator
+	table.insert(lines, "")
+	line_num = line_num + 1
+
+	-- Checked Files section
+	table.insert(lines, string.format("Checked Files (%d)", #checked_files))
+	line_highlights[line_num] = { { group = "BaGitMenuHeader", start_col = 0, end_col = -1 } }
+	table.insert(selectable_lines, line_num)
+	line_to_file[line_num] = { is_category = true, section = "checked", files = checked_files }
+	line_num = line_num + 1
+
+	-- Render checked files
+	if #checked_files > 0 then
+		for i, file_info in ipairs(checked_files) do
+			local filepath = file_info.file
+
+			-- Assign keybinds
+			local keybind_diff = nil
+			local keybind_direct = nil
+
+			if keybind_idx <= #keybind_sequence_diff then
+				keybind_diff = keybind_sequence_diff[keybind_idx]
+				keybind_to_line_diff[keybind_diff] = line_num
+			end
+
+			if keybind_idx <= #keybind_sequence_direct then
+				keybind_direct = keybind_sequence_direct[keybind_idx]
+				keybind_to_line_direct[keybind_direct] = line_num
+			end
+
+			local keybind = keybind_diff
+			keybind_idx = keybind_idx + 1
+
+			-- Determine status indicator based on changes
+			local status = "M"
+			if file_info.additions and file_info.additions > 0 and (not file_info.deletions or file_info.deletions == 0) then
+				status = "A" -- Mostly additions
+			elseif file_info.deletions and file_info.deletions > 0 and (not file_info.additions or file_info.additions == 0) then
+				status = "D" -- Mostly deletions
+			end
+
+			-- Format the line similar to status mode
+			local formatted = ui.format_file_line(filepath, status, state.width, max_filename_width, keybind)
+
+			table.insert(lines, formatted.line)
+
+			-- Copy highlights from formatted line
+			line_highlights[line_num] = formatted.highlights
+
+			-- Add green text color for checked files
+			table.insert(line_highlights[line_num], {
+				group = "BaGitMenuPRReviewed",
+				start_col = 0,
+				end_col = -1,
+			})
+
+			table.insert(selectable_lines, line_num)
+			line_to_file[line_num] = {
+				section = "checked",
+				index = i,
+				entry = {
+					file = filepath,
+					status = status,
+					additions = file_info.additions or 0,
+					deletions = file_info.deletions or 0,
+					reviewed = true,
+					pr_id = file_info.pr_id,
+				},
+			}
+			line_num = line_num + 1
+		end
 	end
 
 	-- Calculate target line for cursor positioning
@@ -573,6 +901,7 @@ refresh_menu = function()
 
 	-- Store state
 	state.lines = render_data.lines
+	state.line_highlights = render_data.line_highlights
 	state.selectable_lines = render_data.selectable_lines
 	state.line_to_file = render_data.line_to_file
 	state.keybind_to_line_diff = render_data.keybind_to_line_diff
@@ -651,6 +980,9 @@ local function toggle_stage()
 	if not file_info then
 		return
 	end
+
+	-- For conflicts, staging is allowed - git will validate if conflicts are resolved
+	-- If conflict markers remain, git will error which we'll show to the user
 
 	-- Check if this is a category header
 	if file_info.is_category then
@@ -846,6 +1178,30 @@ local function discard_changes()
 	local filepath = file_info.entry.file
 	local section = file_info.section
 
+	-- Handle conflicts differently
+	if section == "conflicts" then
+		local choice = vim.fn.confirm(
+			string.format("Resolve conflict in '%s' by accepting incoming changes (theirs)?\nThis will discard your local changes.", filepath),
+			"&Yes\n&No",
+			2
+		)
+
+		if choice ~= 1 then
+			return
+		end
+
+		-- For conflicts, use git checkout --theirs to accept incoming changes
+		local cmd = string.format("git checkout --theirs %s && git add %s", vim.fn.shellescape(filepath), vim.fn.shellescape(filepath))
+		local output = vim.fn.system(cmd)
+		if vim.v.shell_error ~= 0 then
+			vim.notify("Failed to resolve conflict: " .. output, vim.log.levels.ERROR)
+		else
+			vim.notify("Resolved conflict by accepting incoming changes: " .. filepath, vim.log.levels.INFO)
+			refresh_menu()
+		end
+		return
+	end
+
 	-- Can only discard unstaged changes
 	if section == "staged" then
 		vim.notify("Cannot discard staged changes. Unstage first with 's'", vim.log.levels.WARN)
@@ -895,6 +1251,30 @@ local function revert_unstaged()
 	local filepath = file_info.entry.file
 	local section = file_info.section
 
+	-- Handle conflicts - offer to accept our changes (ours)
+	if section == "conflicts" then
+		local choice = vim.fn.confirm(
+			string.format("Resolve conflict in '%s' by keeping your local changes (ours)?", filepath),
+			"&Yes\n&No",
+			2
+		)
+
+		if choice ~= 1 then
+			return
+		end
+
+		-- For conflicts, use git checkout --ours to keep our changes
+		local cmd = string.format("git checkout --ours %s && git add %s", vim.fn.shellescape(filepath), vim.fn.shellescape(filepath))
+		local output = vim.fn.system(cmd)
+		if vim.v.shell_error ~= 0 then
+			vim.notify("Failed to resolve conflict: " .. output, vim.log.levels.ERROR)
+		else
+			vim.notify("Resolved conflict by keeping your local changes: " .. filepath, vim.log.levels.INFO)
+			refresh_menu()
+		end
+		return
+	end
+
 	-- Can only revert unstaged changes
 	if section == "staged" then
 		vim.notify("Cannot revert staged changes. Use this on unstaged files only.", vim.log.levels.WARN)
@@ -935,6 +1315,143 @@ local function revert_unstaged()
 	end
 end
 
+-- Toggle file review status in PR mode
+local function toggle_review_status()
+	-- Only works in PR mode
+	if state.current_mode ~= "pr" then
+		vim.notify("This action is only available in Pull Request mode", vim.log.levels.WARN)
+		return
+	end
+
+	local file_info = get_current_file()
+	if not file_info or not file_info.entry then
+		return
+	end
+
+	local filepath = file_info.entry.file
+	local pr_id = file_info.entry.pr_id
+	local is_reviewed = file_info.entry.reviewed or false
+	local current_section = file_info.section
+
+	-- Check if we have a PR ID
+	if not pr_id then
+		vim.notify("PR ID not available. Try refreshing the menu.", vim.log.levels.ERROR)
+		return
+	end
+
+	-- Check if cache is available
+	if not pr_files_cache.data then
+		vim.notify("Cache not available. Try refreshing the menu.", vim.log.levels.ERROR)
+		return
+	end
+
+	-- Calculate new status
+	local new_reviewed_status = not is_reviewed
+
+	-- If we're marking a file as checked (was unchecked), find the next unchecked file
+	-- so we can position on it after the refresh
+	local next_unchecked_file = nil
+	if not is_reviewed and current_section == "unchecked" then
+		-- Build a sorted list of line numbers for unchecked files
+		local unchecked_lines = {}
+		for line_num, line_file_info in pairs(state.line_to_file) do
+			if not line_file_info.is_category and line_file_info.section == "unchecked" then
+				table.insert(unchecked_lines, line_num)
+			end
+		end
+		table.sort(unchecked_lines)
+
+		-- Find the next unchecked file after the current line
+		local found_next = false
+		for _, line_num in ipairs(unchecked_lines) do
+			if line_num > state.current_line then
+				next_unchecked_file = state.line_to_file[line_num].entry.file
+				found_next = true
+				break
+			end
+		end
+
+		-- If we didn't find a next file (we were on the last one), get the first unchecked file
+		-- But only if there are other unchecked files remaining
+		if not found_next and #unchecked_lines > 1 then
+			next_unchecked_file = state.line_to_file[unchecked_lines[1]].entry.file
+		end
+
+		-- Update last_selected_file so the refresh positions on the next unchecked file
+		if next_unchecked_file and next_unchecked_file ~= filepath then
+			last_selected_file = next_unchecked_file
+		end
+	end
+
+	-- OPTION 1: IN-PLACE CACHE UPDATE
+	-- Find the file in cache and update its reviewed status
+	local cache_file_updated = false
+	for _, cached_file in ipairs(pr_files_cache.data) do
+		if cached_file.file == filepath then
+			cached_file.reviewed = new_reviewed_status
+			cache_file_updated = true
+			break
+		end
+	end
+
+	if not cache_file_updated then
+		vim.notify("File not found in cache. Try refreshing the menu.", vim.log.levels.ERROR)
+		return
+	end
+
+	-- Clear current_line so render_pr_mode doesn't try to stay on the current file
+	-- This forces it to use last_selected_file instead
+	state.current_line = nil
+
+	-- Immediately refresh menu with updated cache (instant!)
+	refresh_menu()
+
+	-- Show immediate feedback
+	local new_status_text = new_reviewed_status and "reviewed" or "unreviewed"
+	vim.notify(string.format("Marking as %s: %s", new_status_text, filepath), vim.log.levels.INFO)
+
+	-- Run API call in background using jobstart (non-blocking)
+	local cmd = string.format(
+		"gh api graphql -f query=%s",
+		vim.fn.shellescape(string.format(
+			[[mutation { %s(input: {pullRequestId: "%s", path: "%s"}) { pullRequest { id } } }]],
+			new_reviewed_status and "markFileAsViewed" or "unmarkFileAsViewed",
+			pr_id,
+			filepath
+		))
+	)
+
+	vim.fn.jobstart(cmd, {
+		on_exit = function(_, exit_code)
+			if exit_code ~= 0 then
+				-- API call failed - revert the cache update and refresh
+				vim.schedule(function()
+					-- Find the file in cache and revert its status
+					for _, cached_file in ipairs(pr_files_cache.data) do
+						if cached_file.file == filepath then
+							cached_file.reviewed = is_reviewed
+							break
+						end
+					end
+
+					-- Refresh menu to show reverted state
+					if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+						refresh_menu()
+					end
+
+					vim.notify(
+						string.format("Failed to sync review status for: %s", filepath),
+						vim.log.levels.ERROR
+					)
+				end)
+			else
+				-- API call succeeded - cache is already correct, no action needed
+				-- The cache already has the correct state, and we don't need to refetch from server
+			end
+		end,
+	})
+end
+
 -- Toggle (stage/unstage) all files at the current file's path
 local function toggle_path()
 	-- Only works in status mode
@@ -947,6 +1464,8 @@ local function toggle_path()
 	if not file_info then
 		return
 	end
+
+	-- For conflicts, allow staging - git will validate if resolved
 
 	-- If on category, just behave like 's' (stage/unstage all)
 	if file_info.is_category then
@@ -1053,6 +1572,7 @@ local function setup_keymaps(buf)
 	vim.keymap.set("n", "d", discard_changes, opts)
 	vim.keymap.set("n", "r", revert_unstaged, opts)
 	vim.keymap.set("n", "p", toggle_path, opts)
+	vim.keymap.set("n", "c", toggle_review_status, opts)
 
 	-- Close
 	vim.keymap.set("n", "q", close_menu, opts)
@@ -1091,6 +1611,7 @@ M.show = function()
 	vim.api.nvim_set_hl(0, "BaGitMenuModified", get_fg_hl("DiffChange"))
 	vim.api.nvim_set_hl(0, "BaGitMenuDeleted", get_fg_hl("DiffDelete"))
 	vim.api.nvim_set_hl(0, "BaGitMenuUntracked", get_fg_hl("Directory"))
+	vim.api.nvim_set_hl(0, "BaGitMenuConflict", get_fg_hl("ErrorMsg"))
 	vim.api.nvim_set_hl(0, "BaGitMenuPath", get_fg_hl("Comment"))
 	vim.api.nvim_set_hl(0, "BaGitMenuHeader", get_fg_hl("Title"))
 	vim.api.nvim_set_hl(0, "BaGitMenuKeybind", get_fg_hl("Comment"))
@@ -1159,8 +1680,11 @@ M.show = function()
 	-- Render content based on current mode
 	refresh_menu()
 
-	-- Setup keymaps
-	setup_keymaps(state.buf)
+	-- Setup keymaps only if buffer is still valid
+	-- (refresh_menu might have closed the menu if there are no changes)
+	if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+		setup_keymaps(state.buf)
+	end
 end
 
 return M

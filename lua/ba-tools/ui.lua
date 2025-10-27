@@ -9,6 +9,7 @@ local status_icons = {
 	M = "●", -- Modified (yellow)
 	D = "−", -- Deleted (red)
 	U = "?", -- Untracked (blue)
+	C = "✗", -- Conflict (red/error)
 }
 
 -- Create a centered floating window
@@ -182,6 +183,8 @@ M.format_file_line = function(filepath, status, width, max_filename_width, keybi
 		status_hl = "BaGitMenuDeleted"
 	elseif status == "U" then
 		status_hl = "BaGitMenuUntracked"
+	elseif status == "C" then
+		status_hl = "BaGitMenuConflict"
 	end
 
 	local status_pos = #line - #status_icon
