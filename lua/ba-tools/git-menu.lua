@@ -1123,7 +1123,7 @@ local function toggle_stage()
 	end
 end
 
--- Open diff with native vim diff
+-- Open diff using diffview with custom configuration (no file panel)
 local function open_diff()
 	local file_info = get_current_file()
 	if not file_info then
@@ -1138,101 +1138,40 @@ local function open_diff()
 
 	local filepath = file_info.entry.file
 	local is_untracked = file_info.entry.status == "U"
-	local section = file_info.section
 
 	-- For untracked files, just open them normally (no diff to show)
 	if is_untracked then
 		close_menu()
-		-- Clean up any existing diff mode and windows
-		vim.cmd("diffoff!")
-		vim.cmd("only")
 		vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 		return
-	end
-
-	-- Determine which version to diff against based on mode
-	local diff_against_index = false
-	local diff_label = "HEAD"
-	local base_ref = nil
-
-	if state.current_mode == "pr" then
-		-- In PR mode: diff current branch vs base branch
-		local pr_data, err = git.get_current_pr()
-		if pr_data and pr_data.baseRefName then
-			base_ref = pr_data.baseRefName
-			diff_label = pr_data.baseRefName
-		else
-			-- Fallback to main if we can't get base branch
-			base_ref = "main"
-			diff_label = "main"
-		end
-	elseif section == "unstaged" then
-		-- Status mode: For unstaged files, check if file is also staged (to show index vs working)
-		local status, err = git.get_status()
-		if status then
-			for _, entry in ipairs(status.staged) do
-				if entry.file == filepath then
-					-- File is both staged and unstaged - show index vs working
-					diff_against_index = true
-					diff_label = "Staged"
-					break
-				end
-			end
-		end
 	end
 
 	-- Close menu
 	close_menu()
 
-	-- Turn off diff mode in all windows before cleanup
-	vim.cmd("diffoff!")
-
-	-- Close all other windows to ensure clean diff setup (only 2 windows)
-	vim.cmd("only")
-
-	-- Open the file (current version)
-	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
-
-	-- Get the comparison version
-	local comparison_content
-	if base_ref then
-		-- PR mode: Get file from base branch
-		comparison_content = vim.fn.system("git show " .. vim.fn.shellescape(base_ref .. ":" .. filepath) .. " 2>&1")
-	elseif diff_against_index then
-		-- Get staged (index) version: git show :0:<file>
-		comparison_content = vim.fn.system("git show :0:" .. vim.fn.shellescape(filepath))
-	else
-		-- Get HEAD version
-		comparison_content = vim.fn.system("git show HEAD:" .. vim.fn.shellescape(filepath))
-	end
-
-	if vim.v.shell_error ~= 0 then
-		vim.notify("Failed to get " .. diff_label .. " version of file", vim.log.levels.ERROR)
+	-- Load diffview module
+	local ok, diffview = pcall(require, 'diffview')
+	if not ok then
+		vim.notify("Diffview not available, falling back to native diff", vim.log.levels.WARN)
+		vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 		return
 	end
 
-	-- Create a temporary buffer for comparison version
-	vim.cmd("vertical new")
-	local comparison_buf = vim.api.nvim_get_current_buf()
-	vim.api.nvim_buf_set_name(comparison_buf, filepath .. " (" .. diff_label .. ")")
+	-- Open current working changes (HEAD vs working tree)
+	vim.cmd("DiffviewOpen HEAD -- " .. vim.fn.fnameescape(filepath))
 
-	-- Set buffer options
-	vim.api.nvim_buf_set_option(comparison_buf, "buftype", "nofile")
-	vim.api.nvim_buf_set_option(comparison_buf, "bufhidden", "wipe")
-	vim.api.nvim_buf_set_option(comparison_buf, "swapfile", false)
+	-- Wait for diffview to open, then close the file panel
+	vim.defer_fn(function()
+		local diffview_lib = require('diffview.lib')
+		local view = diffview_lib.get_current_view()
 
-	-- Set the content
-	local lines = vim.split(comparison_content, "\n")
-	vim.api.nvim_buf_set_lines(comparison_buf, 0, -1, false, lines)
-
-	-- Set filetype to match the original file
-	local ft = vim.bo.filetype
-	vim.api.nvim_buf_set_option(comparison_buf, "filetype", ft)
-
-	-- Enable diff mode on both buffers
-	vim.cmd("diffthis")
-	vim.cmd("wincmd p")  -- Go back to working file
-	vim.cmd("diffthis")
+		if view and view.panel then
+			-- Close the file panel (left side list)
+			if view.panel:is_open() then
+				view.panel:close()
+			end
+		end
+	end, 100) -- 100ms delay to let diffview fully initialize
 end
 
 -- Discard changes to the selected file
