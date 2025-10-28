@@ -1161,8 +1161,21 @@ local function open_diff()
 		return
 	end
 
-	-- Open current working changes (HEAD vs working tree)
-	vim.cmd("DiffviewOpen HEAD -- " .. vim.fn.fnameescape(filepath))
+	-- Determine what to diff against based on mode
+	local diff_base = "HEAD"
+	if state.current_mode == "pr" then
+		-- In PR mode: diff against base branch
+		local pr_data, err = git.get_current_pr()
+		if pr_data and pr_data.baseRefName then
+			diff_base = pr_data.baseRefName
+		else
+			-- Fallback to main if we can't get base branch
+			diff_base = "main"
+		end
+	end
+
+	-- Open diff view
+	vim.cmd("DiffviewOpen " .. diff_base .. " -- " .. vim.fn.fnameescape(filepath))
 
 	-- Wait for diffview to open, then close the file panel
 	vim.defer_fn(function()
