@@ -180,7 +180,20 @@ end
 -- - If file is staged: restores from index (staged version)
 -- - If file is not staged: restores from HEAD
 M.restore_file = function(filepath)
-	local cmd = string.format("git restore %s 2>&1", vim.fn.shellescape(filepath))
+	-- Check if file is tracked by git
+	local check_cmd = string.format("git ls-files %s", vim.fn.shellescape(filepath))
+	local tracked_output = vim.fn.system(check_cmd)
+	local is_tracked = vim.v.shell_error == 0 and tracked_output ~= ""
+
+	local cmd
+	if not is_tracked then
+		-- File is untracked (new file) - use git clean to remove it
+		cmd = string.format("git clean -f %s 2>&1", vim.fn.shellescape(filepath))
+	else
+		-- File is tracked - restore from git
+		cmd = string.format("git restore %s 2>&1", vim.fn.shellescape(filepath))
+	end
+
 	local output = vim.fn.system(cmd)
 	if vim.v.shell_error ~= 0 then
 		return false, "Failed to restore file: " .. output

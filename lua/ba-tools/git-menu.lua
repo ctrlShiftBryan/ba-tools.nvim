@@ -1277,9 +1277,48 @@ local function revert_unstaged()
 		return
 	end
 
-	-- Cannot revert a category
+	-- Handle category reverting
 	if file_info.is_category then
-		vim.notify("Cannot revert category. Select individual files.", vim.log.levels.WARN)
+		local section = file_info.section
+
+		-- Can only revert unstaged category
+		if section == "staged" then
+			vim.notify("Cannot revert staged changes. Use this on unstaged files only.", vim.log.levels.WARN)
+			return
+		end
+
+		local files = file_info.files or {}
+		if #files == 0 then
+			vim.notify("No files to revert in this category.", vim.log.levels.WARN)
+			return
+		end
+
+		-- Confirm before reverting all files
+		local choice = vim.fn.confirm(
+			string.format("Revert all %d files in this category?", #files),
+			"&Yes\n&No",
+			2
+		)
+
+		if choice ~= 1 then
+			return
+		end
+
+		-- Revert all files
+		local failed = {}
+		for _, entry in ipairs(files) do
+			local success, restore_err = git.restore_file(entry.file)
+			if not success then
+				table.insert(failed, entry.file)
+			end
+		end
+
+		if #failed > 0 then
+			vim.notify(string.format("Failed to revert %d files: %s", #failed, table.concat(failed, ", ")), vim.log.levels.ERROR)
+		else
+			vim.notify(string.format("Reverted %d files", #files), vim.log.levels.INFO)
+		end
+		refresh_menu()
 		return
 	end
 
