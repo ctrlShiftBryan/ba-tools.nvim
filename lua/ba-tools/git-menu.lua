@@ -1717,10 +1717,16 @@ local function setup_keymaps(buf)
 		end, opts)
 	end
 
-	-- Actions
+	-- Actions keymap
 	vim.keymap.set("n", "<CR>", open_diff, opts)
 	vim.keymap.set("n", "o", open_file, opts)
-	vim.keymap.set("n", "s", toggle_stage, opts)
+	vim.keymap.set("n", "s", function()
+		if state.current_mode == "status" then
+			toggle_stage()
+		else -- pr mode
+			toggle_review_status()
+		end
+	end, opts)
 	vim.keymap.set("n", "d", discard_changes, opts)
 	vim.keymap.set("n", "r", function()
 		if state.current_mode == "status" then
@@ -1730,7 +1736,6 @@ local function setup_keymaps(buf)
 		end
 	end, opts)
 	vim.keymap.set("n", "p", toggle_path, opts)
-	vim.keymap.set("n", "c", toggle_review_status, opts)
 
 	-- Close
 	vim.keymap.set("n", "q", close_menu, opts)
