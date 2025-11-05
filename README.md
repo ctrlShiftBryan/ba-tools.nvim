@@ -9,6 +9,7 @@ Personal neovim plugin for custom tools and utilities.
 - ⚡ **Fast Batch Operations** - Stage/unstage multiple files with a single git command
 - 🎯 **Smart Navigation** - Section-aware operations and auto-close behavior
 - 🎨 **Theme Compatible** - Automatically adapts to your colorscheme
+- 💬 **PR Comment Workflow** - Add comments in code during review, auto-post to GitHub, auto-revert local changes
 
 ## Installation
 
@@ -34,7 +35,9 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 }
 ```
 
-## Available Functions
+## Available Functions & Commands
+
+The plugin provides both Lua functions and Vim commands. Commands (`:PrCommentsFile`, `:PrCommentsBatch`) are documented in the [Commands](#commands) section below.
 
 ### `hello()`
 Prints a hello message to test the plugin is working.
@@ -109,6 +112,57 @@ When merge conflicts are detected, a "Merge Changes" section appears at the top 
 
 **Usage:** Press `<C-g>` to open the git menu. Navigate away with window commands to auto-close.
 
+**PR Mode:**
+The git menu supports a PR (Pull Request) mode for reviewing GitHub PRs. Switch between modes with `P` (PR mode) and `S` (Status mode).
+
+In PR mode:
+- `s` - Toggle file review status (mark as viewed/unviewed on GitHub)
+- `r` - Revert file to base branch (delete new files, restore modified/deleted)
+- `c` - **Post PR comments** - Scan all PR files for added comments, post to GitHub, revert local changes
+- All other keybindings work the same as status mode
+
+## Commands
+
+### `:PrCommentsFile`
+Posts PR review comments from the current file.
+
+**Workflow:**
+1. Open a PR file in your editor
+2. Add comments anywhere in the file using your language's comment syntax (e.g., `--`, `//`, `#`)
+3. Run `:PrCommentsFile`
+4. Plugin scans the file for added comments via git diff
+5. Comments are posted to GitHub PR as review comments
+6. Local changes are automatically reverted (comments removed)
+
+**Usage:** While viewing a PR file, add comments in the code, then run `:PrCommentsFile` to post them to GitHub.
+
+### `:PrCommentsBatch`
+Posts PR review comments from all PR files (batch mode).
+
+**Workflow:**
+1. Add comments in any PR files in your working directory
+2. Run `:PrCommentsBatch`
+3. Plugin scans all PR files for added comments via git diff
+4. All comments are posted to GitHub PR as a single review
+5. Local changes are automatically reverted (comments removed)
+
+**Usage:** After adding comments to multiple PR files, run `:PrCommentsBatch` to post them all at once. Also accessible via `c` keybinding in PR mode of the git menu.
+
+**Features (both commands):**
+- **Language-agnostic** - Detects comment syntax based on file type
+- **Multi-line support** - Consecutive comment lines are grouped into single review comments
+- **Smart diff parsing** - Only new comments (added lines) are posted
+- **Markdown conversion** - Comments are converted to clean markdown for GitHub
+- **Auto-cleanup** - Local files are restored after posting
+
+**Supported languages:** Lua, JavaScript, TypeScript, Python, Ruby, Go, Rust, C/C++, Java, Shell, and more.
+
+**Optional keybindings:** You can bind these commands in your config:
+```lua
+vim.keymap.set('n', '<leader>pc', ':PrCommentsFile<CR>', { desc = 'Post PR comments from file' })
+vim.keymap.set('n', '<leader>pb', ':PrCommentsBatch<CR>', { desc = 'Post PR comments batch' })
+```
+
 ## Development
 
 This is a personal plugin for local use only. Add new functions to `lua/ba-tools/init.lua` and reload with `:Lazy reload ba-tools.nvim`.
@@ -118,12 +172,14 @@ This is a personal plugin for local use only. Add new functions to `lua/ba-tools
 - `lua/ba-tools/git.lua` - Git command execution and status parsing
 - `lua/ba-tools/ui.lua` - Floating window utilities and visual formatting
 - `lua/ba-tools/git-menu.lua` - Git menu navigation, keybindings, and rendering
+- `lua/ba-tools/pr-comments.lua` - PR comment extraction, posting, and cleanup
 - `lua/ba-tools/init.lua` - Main plugin entry point
 
 ## Requirements
 
 - Neovim >= 0.9.0
 - Git (for git menu functionality)
+- [GitHub CLI (`gh`)](https://cli.github.com/) (for PR mode and comment posting)
 - [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) (optional, for file type icons)
 - A Nerd Font (optional, for icons to display correctly)
 

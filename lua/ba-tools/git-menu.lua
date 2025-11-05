@@ -1687,6 +1687,26 @@ local function toggle_path()
 	refresh_menu()
 end
 
+-- Post PR comments from added comments in files (batch mode)
+local function post_pr_comments()
+	-- Only works in PR mode
+	if state.current_mode ~= "pr" then
+		vim.notify("This action is only available in Pull Request mode", vim.log.levels.WARN)
+		return
+	end
+
+	-- Call the batch function and refresh menu after
+	local ba_tools = require("ba-tools")
+	ba_tools.post_pr_comment_batch()
+
+	-- Refresh menu to show updated file states
+	vim.schedule(function()
+		if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+			refresh_menu()
+		end
+	end)
+end
+
 -- Setup keymaps for the menu
 local function setup_keymaps(buf)
 	local opts = { buffer = buf, nowait = true, silent = true }
@@ -1736,6 +1756,7 @@ local function setup_keymaps(buf)
 		end
 	end, opts)
 	vim.keymap.set("n", "p", toggle_path, opts)
+	vim.keymap.set("n", "c", post_pr_comments, opts)
 
 	-- Close
 	vim.keymap.set("n", "q", close_menu, opts)

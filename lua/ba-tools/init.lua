@@ -8,7 +8,14 @@ M.setup = function(opts)
 	opts = opts or {}
 	M.config = vim.tbl_deep_extend("force", M.config, opts)
 
-	-- Any initialization code goes here
+	-- Register user commands
+	vim.api.nvim_create_user_command("PrCommentsFile", function()
+		M.post_pr_comment_file()
+	end, { desc = "Post PR comments from current file" })
+
+	vim.api.nvim_create_user_command("PrCommentsBatch", function()
+		M.post_pr_comment_batch()
+	end, { desc = "Post PR comments from all PR files" })
 end
 
 -- Example function: Print a hello message
@@ -29,6 +36,51 @@ end
 M.git_menu = function()
 	local git_menu = require("ba-tools.git-menu")
 	git_menu.show()
+end
+
+-- Post PR comments from current file
+M.post_pr_comment_file = function()
+	local bufnr = vim.api.nvim_get_current_buf()
+	local filepath = vim.api.nvim_buf_get_name(bufnr)
+
+	-- Convert to relative path
+	local cwd = vim.fn.getcwd()
+	filepath = vim.fn.fnamemodify(filepath, ":.")
+
+	-- Check if we have a valid file
+	if filepath == "" then
+		vim.notify("No file in current buffer", vim.log.levels.ERROR)
+		return
+	end
+
+	-- Show processing message
+	vim.notify("Scanning " .. filepath .. " for comments...", vim.log.levels.INFO)
+
+	-- Process comments for this file
+	local pr_comments = require("ba-tools.pr-comments")
+	local success, msg = pr_comments.process_comments("file", filepath)
+
+	if success then
+		vim.notify(msg, vim.log.levels.INFO)
+	else
+		vim.notify("Failed to post comments: " .. msg, vim.log.levels.ERROR)
+	end
+end
+
+-- Post PR comments from all PR files (batch mode)
+M.post_pr_comment_batch = function()
+	-- Show processing message
+	vim.notify("Scanning PR files for comments...", vim.log.levels.INFO)
+
+	-- Process comments in batch mode
+	local pr_comments = require("ba-tools.pr-comments")
+	local success, msg = pr_comments.process_comments("batch")
+
+	if success then
+		vim.notify(msg, vim.log.levels.INFO)
+	else
+		vim.notify("Failed to post comments: " .. msg, vim.log.levels.ERROR)
+	end
 end
 
 return M
