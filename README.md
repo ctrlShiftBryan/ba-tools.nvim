@@ -121,6 +121,22 @@ In PR mode:
 - `c` - **Post PR comments** - Scan all PR files for added comments, post to GitHub, revert local changes
 - All other keybindings work the same as status mode
 
+**PR Comments Sidebar:**
+When viewing a file in diff mode (in PR mode):
+- **Sign column markers** (💬) automatically appear in the diff view to show which lines have comments
+- **Inline comment previews** appear at the end of commented lines showing author and first line of comment
+- Press `C` to toggle a floating comment panel that shows:
+  - Existing GitHub PR review comments with author and timestamp
+  - Full comment text always visible
+  - Read-only viewer for existing feedback
+  - Floating window that appears on the right side of your screen
+
+Panel keybindings:
+- `j`/`k` - Navigate up/down through comments
+- `J` - Jump to comment's line in diff view
+- `R` - Refresh comments (re-fetch from GitHub)
+- `C`/`q`/`<Esc>` - Close panel
+
 ## Commands
 
 ### `:PrCommentsFile`
@@ -163,6 +179,29 @@ vim.keymap.set('n', '<leader>pc', ':PrCommentsFile<CR>', { desc = 'Post PR comme
 vim.keymap.set('n', '<leader>pb', ':PrCommentsBatch<CR>', { desc = 'Post PR comments batch' })
 ```
 
+### `:PrCommentsSidebar`
+Toggles a read-only floating panel showing existing GitHub PR review comments for the current file.
+
+**Workflow:**
+1. Open a file (in a PR branch)
+2. Run `:PrCommentsSidebar`
+3. Panel appears showing all GitHub review comments with full text
+4. Navigate with `j`/`k`, jump to lines with `J`
+5. Press `R` to refresh, `C` to close
+
+**Features:**
+- **GitHub integration** - Fetches existing PR review comments via GitHub API
+- **Full text display** - All comments shown expanded for easy reading
+- **Interactive navigation** - Jump between panel and code
+- **Smart caching** - Caches GitHub comments for 120 seconds
+- **Author & timestamps** - See who commented and when
+- **Floating window** - Non-intrusive panel that doesn't affect your diff layout
+- **Sign column markers** - 💬 icons appear in the sign column on lines with comments
+
+**Auto-available in diff view:** When viewing a file in PR mode diff view, press `C` to toggle panel (no command needed).
+
+**Usage:** Run `:PrCommentsSidebar` while viewing any file in a PR branch to see all existing review comments from GitHub.
+
 ## Development
 
 This is a personal plugin for local use only. Add new functions to `lua/ba-tools/init.lua` and reload with `:Lazy reload ba-tools.nvim`.
@@ -173,6 +212,7 @@ This is a personal plugin for local use only. Add new functions to `lua/ba-tools
 - `lua/ba-tools/ui.lua` - Floating window utilities and visual formatting
 - `lua/ba-tools/git-menu.lua` - Git menu navigation, keybindings, and rendering
 - `lua/ba-tools/pr-comments.lua` - PR comment extraction, posting, and cleanup
+- `lua/ba-tools/pr-comment-sidebar.lua` - PR comment sidebar display and interaction
 - `lua/ba-tools/init.lua` - Main plugin entry point
 
 ## Requirements

@@ -217,9 +217,9 @@ end
 -- Generate window title based on current mode
 local function get_window_title()
 	if state.current_mode == "status" then
-		return " Git [Status (S)]  Pull Request (P) "
+		return " [Git Status (G)]  Pull Request (P) "
 	else
-		return " Git Status (S)  [Pull Request (P)] "
+		return " Git Status (G)  [Pull Request (P)] "
 	end
 end
 
@@ -1123,6 +1123,111 @@ local function toggle_stage()
 	end
 end
 
+-- Bulk stage/unstage all files in the current file's directory and subdirectories
+local function bulk_stage_directory()
+	-- Only works in status mode
+	if state.current_mode ~= "status" then
+		vim.notify("This action is only available in Status mode", vim.log.levels.WARN)
+		return
+	end
+
+	local file_info = get_current_file()
+	if not file_info then
+		return
+	end
+
+	-- Skip if on category header
+	if file_info.is_category then
+		vim.notify("Select a file to bulk stage its directory", vim.log.levels.WARN)
+		return
+	end
+
+	local filepath = file_info.entry.file
+	local section = file_info.section
+
+	-- Extract directory path (e.g., "src/components/Button.tsx" -> "src/components/")
+	local dir_path = filepath:match("^(.*/)")
+
+	-- Handle root-level files (no directory)
+	if not dir_path then
+		-- For root-level files, just stage/unstage the single file
+		if section == "staged" then
+			local success, err = git.unstage_file(filepath)
+			if success then
+				vim.notify("Unstaged: " .. filepath, vim.log.levels.INFO)
+				refresh_menu()
+			else
+				vim.notify(err, vim.log.levels.ERROR)
+			end
+		else
+			local success, err = git.stage_file(filepath)
+			if success then
+				vim.notify("Staged: " .. filepath, vim.log.levels.INFO)
+				refresh_menu()
+			else
+				vim.notify(err, vim.log.levels.ERROR)
+			end
+		end
+		return
+	end
+
+	-- Get current git status
+	local git_status = git.get_status()
+
+	-- Collect all files that match the directory path (including subdirectories)
+	local matching_files = {}
+
+	-- Check all sections
+	for _, entry in ipairs(git_status.staged) do
+		if entry.file:sub(1, #dir_path) == dir_path then
+			table.insert(matching_files, entry.file)
+		end
+	end
+
+	for _, entry in ipairs(git_status.unstaged) do
+		if entry.file:sub(1, #dir_path) == dir_path then
+			table.insert(matching_files, entry.file)
+		end
+	end
+
+	for _, entry in ipairs(git_status.conflicts) do
+		if entry.file:sub(1, #dir_path) == dir_path then
+			table.insert(matching_files, entry.file)
+		end
+	end
+
+	-- If no matching files found, notify and return
+	if #matching_files == 0 then
+		vim.notify("No files found in directory: " .. dir_path, vim.log.levels.WARN)
+		return
+	end
+
+	-- Determine action based on current file's section
+	local success, err
+	if section == "staged" then
+		-- Unstage all matching files
+		success, err = git.unstage_files(matching_files)
+		if success then
+			vim.notify(string.format("Unstaged %d files in %s", #matching_files, dir_path), vim.log.levels.INFO)
+		else
+			vim.notify(string.format("Failed to unstage files: %s", err or "unknown error"), vim.log.levels.ERROR)
+		end
+	else
+		-- Stage all matching files
+		success, err = git.stage_files(matching_files)
+		if success then
+			vim.notify(string.format("Staged %d files in %s", #matching_files, dir_path), vim.log.levels.INFO)
+		else
+			vim.notify(string.format("Failed to stage files: %s", err or "unknown error"), vim.log.levels.ERROR)
+		end
+	end
+
+	-- Refresh the menu
+	if success then
+		refresh_menu()
+	end
+end
+
 -- Open diff using diffview with custom configuration (no file panel)
 local function open_diff()
 	local file_info = get_current_file()
@@ -1167,17 +1272,18 @@ local function open_diff()
 		-- In PR mode: diff against base branch
 		local pr_data, err = git.get_current_pr()
 		if pr_data and pr_data.baseRefName then
-			diff_base = pr_data.baseRefName
+			-- Use origin/ prefix to ensure we diff against remote branch
+			diff_base = "origin/" .. pr_data.baseRefName
 		else
-			-- Fallback to main if we can't get base branch
-			diff_base = "main"
+			-- Fallback to origin/main if we can't get base branch
+			diff_base = "origin/main"
 		end
 	end
 
 	-- Open diff view
 	vim.cmd("DiffviewOpen " .. diff_base .. " -- " .. vim.fn.fnameescape(filepath))
 
-	-- Wait for diffview to open, then close the file panel
+	-- Wait for diffview to open, then close the file panel and setup sidebar keybind
 	vim.defer_fn(function()
 		local diffview_lib = require('diffview.lib')
 		local view = diffview_lib.get_current_view()
@@ -1187,6 +1293,21 @@ local function open_diff()
 			if view.panel:is_open() then
 				view.panel:close()
 			end
+		end
+
+		-- Setup sidebar toggle keybinding (only in PR mode)
+		if state.current_mode == "pr" then
+			-- Get current buffer (should be the diff view buffer)
+			local bufnr = vim.api.nvim_get_current_buf()
+			local sidebar = require("ba-tools.pr-comment-sidebar")
+
+			-- Automatically show signs for this file
+			sidebar.show_signs(filepath, diff_base, bufnr)
+
+			-- Setup C keybinding to toggle PR comment sidebar
+			vim.keymap.set("n", "C", function()
+				sidebar.toggle_sidebar(filepath, diff_base, bufnr)
+			end, { buffer = bufnr, nowait = true, silent = true, desc = "Toggle PR comments sidebar" })
 		end
 	end, 100) -- 100ms delay to let diffview fully initialize
 end
@@ -1747,6 +1868,11 @@ local function setup_keymaps(buf)
 			toggle_review_status()
 		end
 	end, opts)
+	vim.keymap.set("n", "S", function()
+		if state.current_mode == "status" then
+			bulk_stage_directory()
+		end
+	end, opts)
 	vim.keymap.set("n", "d", discard_changes, opts)
 	vim.keymap.set("n", "r", function()
 		if state.current_mode == "status" then
@@ -1763,7 +1889,7 @@ local function setup_keymaps(buf)
 	vim.keymap.set("n", "<Esc>", close_menu, opts)
 
 	-- Mode switching
-	vim.keymap.set("n", "S", function()
+	vim.keymap.set("n", "G", function()
 		switch_mode("status")
 	end, opts)
 	vim.keymap.set("n", "P", function()
