@@ -81,9 +81,9 @@ end
 
 -- Fetch existing GitHub PR comments for a file
 M.fetch_github_comments = function(filepath)
-	-- Check cache first
+	-- Check cache first (no TTL - use R to manually refresh)
 	local cached = state.cache[filepath]
-	if cached and (os.time() - cached.timestamp) < state.cache_ttl then
+	if cached then
 		return cached.comments
 	end
 

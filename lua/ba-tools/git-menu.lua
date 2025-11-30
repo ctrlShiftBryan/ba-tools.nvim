@@ -684,14 +684,12 @@ local function render_pr_mode()
 	end
 
 	-- Get PR files with review status (with caching)
+	-- Cache persists until manual sync with P key
 	local pr_files
-	local current_time = os.time()
-	local cache_ttl = 120 -- Cache for 30 seconds to speed up refreshes
 
-	-- Check if cache is valid
+	-- Check if cache is valid (no TTL - manual refresh only)
 	if pr_files_cache.pr_number == pr_data.number and
-	   pr_files_cache.data and
-	   (current_time - pr_files_cache.timestamp) < cache_ttl then
+	   pr_files_cache.data then
 		-- Use cached data (instant!)
 		pr_files = pr_files_cache.data
 	elseif pr_loading then
@@ -1893,7 +1891,16 @@ local function setup_keymaps(buf)
 		switch_mode("status")
 	end, opts)
 	vim.keymap.set("n", "P", function()
-		switch_mode("pr")
+		if state.current_mode == "pr" then
+			-- Already in PR mode - sync cache from server
+			pr_files_cache.data = nil
+			pr_files_cache.pr_number = nil
+			pr_loading = false
+			refresh_menu()
+			vim.notify("Syncing PR files from server...", vim.log.levels.INFO)
+		else
+			switch_mode("pr")
+		end
 	end, opts)
 
 	-- Make buffer non-modifiable
